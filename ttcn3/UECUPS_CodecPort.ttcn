@@ -1,0 +1,70 @@
+module UECUPS_CodecPort {
+
+/* (C) 2020 by Harald Welte <laforge@gnumonks.org>
+ * All rights reserved.
+ *
+ * Released under the terms of GNU General Public License, Version 2 or
+ * (at your option) any later version.
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+
+	import from IPL4asp_PortType all;
+	import from IPL4asp_Types all;
+	import from UECUPS_Types all;
+
+	type record UECUPS_RecvFrom {
+		ConnectionId	connId,
+		HostName	remName,
+		PortNumber	remPort,
+		HostName	locName,
+		PortNumber	locPort,
+		PDU_UECUPS	msg
+	};
+
+	template UECUPS_RecvFrom t_UECUPS_RecvFrom(template PDU_UECUPS msg) := {
+		connId := ?,
+		remName := ?,
+		remPort := ?,
+		locName := ?,
+		locPort := ?,
+		msg := msg
+	}
+
+	type record UECUPS_Send {
+		ConnectionId	connId,
+		PDU_UECUPS	msg
+	}
+
+	template UECUPS_Send t_UECUPS_Send(template ConnectionId connId, template PDU_UECUPS msg) := {
+		connId := connId,
+		msg := msg
+	}
+
+	private function IPL4_to_UECUPS_RecvFrom(in ASP_RecvFrom pin, out UECUPS_RecvFrom pout) {
+		pout.connId := pin.connId;
+		pout.remName := pin.remName;
+		pout.remPort := pin.remPort;
+		pout.locName := pin.locName;
+		pout.locPort := pin.locPort;
+		pout.msg := f_dec_PDU_UECUPS(pin.msg);
+	} with { extension "prototype(fast)" };
+
+	private function UECUPS_to_IPL4_Send(in UECUPS_Send pin, out ASP_Send pout) {
+		pout.connId := pin.connId;
+		pout.proto := { sctp := {} };
+		pout.msg := f_enc_PDU_UECUPS(pin.msg);
+	} with { extension "prototype(fast)" };
+
+	type port UECUPS_CODEC_PT message {
+		out	UECUPS_Send;
+		in	UECUPS_RecvFrom,
+			ASP_ConnId_ReadyToRelease,
+			ASP_Event;
+	} with { extension "user IPL4asp_PT
+		out(UECUPS_Send -> ASP_Send:function(UECUPS_to_IPL4_Send))
+		in(ASP_RecvFrom -> UECUPS_RecvFrom: function(IPL4_to_UECUPS_RecvFrom);
+		   ASP_ConnId_ReadyToRelease -> ASP_ConnId_ReadyToRelease: simple;
+		   ASP_Event -> ASP_Event: simple)"
+	}
+}

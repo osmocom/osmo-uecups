@@ -1,0 +1,91 @@
+module UECUPS_Types {
+
+import from General_Types all;
+import from Osmocom_Types all;
+
+type enumerated UECUPS_AddrType {
+	IPV4	(1),
+	IPV6	(2)
+};
+
+type enumerated UECUPS_Result {
+	OK			(1),
+	ERR_INVALID_DATA	(2),
+	ERR_NOT_FOUND		(3)
+};
+
+type record UECUPS_SockAddr {
+	UECUPS_AddrType	addr_type,
+	OCT4_16n	ip,
+	uint16_t	Port
+};
+
+/* Create a new GTP-U tunnel in the user plane */
+type record UECUPS_CreateTun {
+	/* TEID in transmit + receive direction */
+	uint32_t	tx_teid,
+	uint32_t	rx_teid,
+
+	/* user address (allocated inside the tunnel) */
+	UECUPS_AddrType user_addr_type,
+	OCT4_16n	user_addr,
+
+	/* GTP endpoint (UDP IP/Port tuples) */
+	UECUPS_SockAddr local_gtp_ep,
+	UECUPS_SockAddr remote_gtp_ep,
+
+	/* TUN device */
+	charstring	tun_dev_name,
+	charstring	tun_netns_name optional
+};
+
+type record UECUPS_CreateTunRes {
+	UECUPS_Result	result
+};
+
+/* Destroy an existing GTP-U tunnel in the user plane */
+type record UECUPS_DestroyTun {
+	/* local GTP endpoint + TEID are sufficient for unique identification */
+	UECUPS_SockAddr local_gtp_ep,
+	uint32_t	rx_teid
+};
+
+type record UECUPS_DestroyTunRes {
+	UECUPS_Result	result
+};
+
+type union PDU_UECUPS {
+	UECUPS_CreateTun	create_tun,
+	UECUPS_CreateTunRes	create_tun_res,
+	UECUPS_DestroyTun	destroy_tun,
+	UECUPS_DestroyTunRes	destroy_tun_res
+};
+
+
+
+external function f_enc_PDU_UECUPS(in PDU_UECUPS inp) return octetstring
+        with { extension "prototype(convert) encode(JSON)" }
+external function f_dec_PDU_UECUPS(in octetstring inp) return PDU_UECUPS
+        with { extension "prototype(convert) decode(JSON)" }
+
+
+private function f_get_addrtype(OCT4_16n addr) return UECUPS_AddrType
+{
+	if (lengthof(addr) == 4) {
+		return IPV4;
+	} else {
+		return IPV6;
+	}
+}
+
+private const integer GTP1U_PORT := 2152;
+
+template (value) UECUPS_SockAddr
+ts_UECUPS_SockAddr(OCT4_16n ip, uint16_t Port := GTP1U_PORT) := {
+	addr_type := f_get_addrtype(ip),
+	ip := ip,
+	Port := Port
+}
+
+
+} with { encode "JSON" };
