@@ -56,11 +56,40 @@ type record UECUPS_DestroyTunRes {
 	UECUPS_Result	result
 };
 
+/* User requests deaemon to start a program in given network namespace */
+type record UECUPS_StartProgram {
+	/* user + group to use when starting command */
+	charstring	run_as_user,
+	charstring	run_as_group,
+	/* the command to be started (with optional environment entries) */
+	charstring	command,
+	charstring_list	environment optional,
+	/* network namespace in which to start the command */
+	charstring      tun_netns_name optional
+};
+type record of charstring charstring_list;
+
+/* Daemon informs us that a program has been started */
+type record UECUPS_StartProgramRes {
+	UECUPS_Result	result,
+	integer		pid
+};
+
+/* Daemon informs us that a program has terminated */
+type record UECUPS_ProgramTermInd {
+	integer		pid,
+	integer		exit_code
+};
+
+
 type union PDU_UECUPS {
 	UECUPS_CreateTun	create_tun,
 	UECUPS_CreateTunRes	create_tun_res,
 	UECUPS_DestroyTun	destroy_tun,
-	UECUPS_DestroyTunRes	destroy_tun_res
+	UECUPS_DestroyTunRes	destroy_tun_res,
+	UECUPS_StartProgram	start_program,
+	UECUPS_StartProgramRes	start_program_res,
+	UECUPS_ProgramTermInd	program_term_ind
 };
 
 

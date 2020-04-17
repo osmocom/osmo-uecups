@@ -116,6 +116,9 @@ struct tun_device *
 tun_device_find_or_create(struct gtp_daemon *d, const char *devname, const char *netns_name);
 
 struct tun_device *
+tun_device_find_netns(struct gtp_daemon *d, const char *netns_name);
+
+struct tun_device *
 _tun_device_find(struct gtp_daemon *d, const char *devname);
 
 void _tun_device_deref_destroy(struct tun_device *tun);
@@ -202,11 +205,14 @@ bool gtp_tunnel_destroy(struct gtp_daemon *d, const struct sockaddr_storage *bin
 
 #define UECUPS_SCTP_PORT	4268
 
+struct osmo_signalfd;
+
 struct gtp_daemon {
 	/* global lists of various objects */
 	struct llist_head gtp_endpoints;
 	struct llist_head tun_devices;
 	struct llist_head gtp_tunnels;
+	struct llist_head subprocesses;
 	/* lock protecting all of the above lists */
 	pthread_rwlock_t rwlock;
 	/* main thread ID */
@@ -214,6 +220,7 @@ struct gtp_daemon {
 	/* client CUPS interface */
 	struct llist_head cups_clients;
 	struct osmo_stream_srv_link *cups_link;
+	struct osmo_signalfd *signalfd;
 
 	struct {
 		char *cups_local_ip;
