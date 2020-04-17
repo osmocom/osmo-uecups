@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <sys/types.h>
+#include <sys/signalfd.h>
 #include <signal.h>
 #include <errno.h>
 
@@ -20,6 +21,7 @@
 #include <osmocom/core/stats.h>
 #include <osmocom/core/rate_ctr.h>
 #include <osmocom/core/socket.h>
+#include <osmocom/core/exec.h>
 #include <osmocom/vty/telnet_interface.h>
 #include <osmocom/vty/logging.h>
 #include <osmocom/vty/stats.h>
@@ -40,6 +42,8 @@
  * Client (Contol/User Plane Separation) Socket
  ***********************************************************************/
 
+#include <pwd.h>
+
 #define CUPS_MSGB_SIZE	1024
 
 #define LOGCC(cc, lvl, fmt, args ...)	\
@@ -53,6 +57,15 @@ struct cups_client {
 	/* client socket */
 	struct osmo_stream_srv *srv;
 	char sockname[OSMO_SOCK_NAME_MAXLEN];
+};
+
+struct subprocess {
+	/* member in daemon->cups_clients */
+	struct llist_head list;
+	/* pointer to the client that started us */
+	struct cups_client *cups_client;
+	/* PID of the process */
+	pid_t pid;
 };
 
 /* Send JSON to a given client/connection */
@@ -289,6 +302,151 @@ static int cups_client_handle_destroy_tun(struct cups_client *cc, json_t *dtun)
 	return 0;
 }
 
+static json_t *gen_uecups_term_ind(pid_t pid, int status)
+{
+	json_t *jterm = json_object();
+	json_t *jret = json_object();
+
+	json_object_set_new(jterm, "pid", json_integer(pid));
+	json_object_set_new(jterm, "exit_code", json_integer(status));
+
+	json_object_set_new(jret, "program_term_ind", jterm);
+
+	return jret;
+}
+
+
+static struct subprocess *subprocess_by_pid(struct gtp_daemon *d, pid_t pid)
+{
+	struct subprocess *sproc;
+	llist_for_each_entry(sproc, &d->subprocesses, list) {
+		if (sproc->pid == pid)
+			return sproc;
+	}
+	return NULL;
+}
+
+static void sigchild_cb(struct osmo_signalfd *osfd, const struct signalfd_siginfo *fdsi)
+{
+	struct gtp_daemon *d = osfd->data;
+	struct subprocess *sproc;
+	json_t *jterm_ind;
+
+	OSMO_ASSERT(fdsi->ssi_signo == SIGCHLD);
+
+	LOGP(DUECUPS, LOGL_DEBUG, "SIGCHLD receive from pid %u; status=%d\n",
+		fdsi->ssi_pid, fdsi->ssi_status);
+
+	sproc = subprocess_by_pid(d, fdsi->ssi_pid);
+	if (!sproc) {
+		LOGP(DUECUPS, LOGL_NOTICE, "subprocess %u terminated (status=%d) but we don't know it?\n",
+			fdsi->ssi_pid, fdsi->ssi_status);
+		return;
+	}
+
+	/* FIXME: generate prog_term_ind towards control plane */
+	jterm_ind = gen_uecups_term_ind(fdsi->ssi_pid, fdsi->ssi_status);
+	if (!jterm_ind)
+		return;
+
+	cups_client_tx_json(sproc->cups_client, jterm_ind);
+
+	llist_del(&sproc->list);
+	talloc_free(sproc);
+}
+
+static json_t *gen_uecups_start_res(pid_t pid, const char *result)
+{
+	json_t *ret = gen_uecups_result("start_program_res", result);
+	json_object_set_new(json_object_get(ret, "start_program_res"), "pid", json_integer(pid));
+
+	return ret;
+}
+
+static int cups_client_handle_start_program(struct cups_client *cc, json_t *sprog)
+{
+	json_t *juser, *jcmd, *jenv, *jnetns, *jres;
+	struct gtp_daemon *d = cc->d;
+	const char *cmd, *user;
+	char **addl_env = NULL;
+	sigset_t oldmask;
+	int nsfd, rc;
+
+	juser = json_object_get(sprog, "run_as_user");
+	jcmd = json_object_get(sprog, "command");
+	jenv = json_object_get(sprog, "environment");
+	jnetns = json_object_get(sprog, "tun_netns_name");
+
+	/* mandatory parts */
+	if (!juser || !jcmd)
+		return -EINVAL;
+	if (!json_is_string(juser) || !json_is_string(jcmd))
+		return -EINVAL;
+
+	/* optional parts */
+	if (jenv && !json_is_array(jenv))
+		return -EINVAL;
+	if (jnetns && !json_is_string(jnetns))
+		return -EINVAL;
+
+	cmd = json_string_value(jcmd);
+	user = json_string_value(juser);
+	if (jnetns) {
+		struct tun_device *tun = tun_device_find_netns(d, json_string_value(jnetns));
+		if (!tun)
+			return -ENODEV;
+		nsfd = tun->netns_fd;
+	}
+
+	/* build environment */
+	if (jenv) {
+		json_t *j;
+		int i;
+		addl_env = talloc_zero_array(cc, char *, json_array_size(jenv)+1);
+		if (!addl_env)
+			return -ENOMEM;
+		json_array_foreach(jenv, i, j) {
+			addl_env[i] = talloc_strdup(addl_env, json_string_value(j));
+		}
+	}
+
+	if (jnetns) {
+		rc = switch_ns(nsfd, &oldmask);
+		if (rc < 0) {
+			talloc_free(addl_env);
+			return -EIO;
+		}
+	}
+
+	rc = osmo_system_nowait2(cmd, osmo_environment_whitelist, addl_env, user);
+
+	if (jnetns) {
+		OSMO_ASSERT(restore_ns(&oldmask) == 0);
+	}
+
+	talloc_free(addl_env);
+
+	if (rc > 0) {
+		/* create a record about the subprocess we started, so we can notify the
+		 * client that crated it upon termination */
+		struct subprocess *sproc = talloc_zero(cc, struct subprocess);
+		if (!sproc)
+			return -ENOMEM;
+
+		sproc->cups_client = cc;
+		sproc->pid = rc;
+		llist_add_tail(&sproc->list, &d->subprocesses);
+		jres = gen_uecups_start_res(sproc->pid, "OK");
+	} else {
+		jres = gen_uecups_start_res(0, "ERR_INVALID_DATA");
+	}
+
+	cups_client_tx_json(cc, jres);
+
+	return 0;
+}
+
+
 static int cups_client_handle_json(struct cups_client *cc, json_t *jroot)
 {
 	void *iter;
@@ -309,6 +467,8 @@ static int cups_client_handle_json(struct cups_client *cc, json_t *jroot)
 		rc = cups_client_handle_create_tun(cc, cmd);
 	} else if (!strcmp(key, "destroy_tun")) {
 		rc = cups_client_handle_destroy_tun(cc, cmd);
+	} else if (!strcmp(key, "start_program")) {
+		rc = cups_client_handle_start_program(cc, cmd);
 	} else {
 		LOGCC(cc, LOGL_NOTICE, "Unknown command '%s' received\n", key);
 		return -EINVAL;
@@ -387,6 +547,17 @@ out:
 static int cups_client_closed_cb(struct osmo_stream_srv *conn)
 {
 	struct cups_client *cc = osmo_stream_srv_get_data(conn);
+	struct gtp_daemon *d = cc->d;
+	struct subprocess *p, *p2;
+
+	/* kill + forget about all subprocesses of this client */
+	llist_for_each_entry_safe(p, p2, &d->subprocesses, list) {
+		if (p->cups_client == cc) {
+			kill(p->pid, SIGKILL);
+			llist_del(&p->list);
+			talloc_free(p);
+		}
+	}
 
 	LOGCC(cc, LOGL_INFO, "UECUPS connection lost\n");
 	llist_del(&cc->list);
@@ -404,6 +575,7 @@ static int cups_accept_cb(struct osmo_stream_srv_link *link, int fd)
 	if (!cc)
 		return -1;
 
+	cc->d = d;
 	osmo_sock_get_name_buf(cc->sockname, sizeof(cc->sockname), fd);
 	cc->srv = osmo_stream_srv_create(cc, link, fd, cups_client_read_cb, cups_client_closed_cb, cc);
 	if (!cc->srv) {
@@ -439,6 +611,7 @@ static struct gtp_daemon *gtp_daemon_alloc(void *ctx)
 	INIT_LLIST_HEAD(&d->gtp_endpoints);
 	INIT_LLIST_HEAD(&d->tun_devices);
 	INIT_LLIST_HEAD(&d->gtp_tunnels);
+	INIT_LLIST_HEAD(&d->subprocesses);
 	pthread_rwlock_init(&d->rwlock, NULL);
 	d->main_thread = pthread_self();
 
@@ -527,6 +700,13 @@ int main(int argc, char **argv)
 	osmo_stream_srv_link_set_data(g_daemon->cups_link, g_daemon);
 	osmo_stream_srv_link_set_accept_cb(g_daemon->cups_link, cups_accept_cb);
 	osmo_stream_srv_link_open(g_daemon->cups_link);
+
+	/* block SIGCHLD via normal delivery; redirect it to signalfd */
+	sigset_t sigset;
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGCHLD);
+	sigprocmask(SIG_BLOCK, &sigset, NULL);
+	g_daemon->signalfd = osmo_signalfd_setup(g_daemon, sigset, sigchild_cb, g_daemon);
 
 	if (g_daemonize) {
 		rc = osmo_daemonize();

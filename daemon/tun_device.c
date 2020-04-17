@@ -337,6 +337,23 @@ _tun_device_find(struct gtp_daemon *d, const char *devname)
 	return NULL;
 }
 
+/* find the first tun device within given named netns */
+struct tun_device *
+tun_device_find_netns(struct gtp_daemon *d, const char *netns_name)
+{
+	struct tun_device *tun;
+
+	pthread_rwlock_rdlock(&d->rwlock);
+	llist_for_each_entry(tun, &d->tun_devices, list) {
+		if (!strcmp(tun->netns_name, netns_name)) {
+			pthread_rwlock_unlock(&d->rwlock);
+			return tun;
+		}
+	}
+	pthread_rwlock_unlock(&d->rwlock);
+	return NULL;
+}
+
 struct tun_device *
 tun_device_find_or_create(struct gtp_daemon *d, const char *devname, const char *netns_name)
 {
