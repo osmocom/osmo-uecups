@@ -421,6 +421,10 @@ static int cups_accept_cb(struct osmo_stream_srv_link *link, int fd)
  * GTP Daemon
  ***********************************************************************/
 
+#ifndef OSMO_VTY_PORT_UECUPS
+#define OSMO_VTY_PORT_UECUPS	4268
+#endif
+
 struct gtp_daemon *g_daemon;
 static int g_daemonize;
 static char *g_config_file = "osmo-gtpu-daemon.cfg";
@@ -441,7 +445,7 @@ static struct gtp_daemon *gtp_daemon_alloc(void *ctx)
 	INIT_LLIST_HEAD(&d->cups_clients);
 
 	d->cfg.cups_local_ip = talloc_strdup(d, "localhost");
-	d->cfg.cups_local_port = 4300;
+	d->cfg.cups_local_port = UECUPS_SCTP_PORT;
 
 	return d;
 }
@@ -504,7 +508,7 @@ int main(int argc, char **argv)
 		exit(2);
 	}
 
-	rc = telnet_init_dynif(ctx, NULL, vty_get_bind_addr(), OSMO_VTY_PORT_GGSN);
+	rc = telnet_init_dynif(ctx, NULL, vty_get_bind_addr(), OSMO_VTY_PORT_UECUPS);
 	if (rc < 0)
 		exit(1);
 

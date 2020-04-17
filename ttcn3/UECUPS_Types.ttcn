@@ -3,6 +3,8 @@ module UECUPS_Types {
 import from General_Types all;
 import from Osmocom_Types all;
 
+const integer UECUPS_SCTP_PORT := 4268;
+
 type enumerated UECUPS_AddrType {
 	IPV4	(1),
 	IPV6	(2)

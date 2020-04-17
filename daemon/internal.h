@@ -200,6 +200,8 @@ bool gtp_tunnel_destroy(struct gtp_daemon *d, const struct sockaddr_storage *bin
  * GTP Daemon
  ***********************************************************************/
 
+#define UECUPS_SCTP_PORT	4268
+
 struct gtp_daemon {
 	/* global lists of various objects */
 	struct llist_head gtp_endpoints;
