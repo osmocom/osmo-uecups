@@ -628,10 +628,25 @@ static int cups_accept_cb(struct osmo_stream_srv_link *link, int fd)
 #define OSMO_VTY_PORT_UECUPS	4268
 #endif
 
+static void *g_tall_ctx;
 struct gtp_daemon *g_daemon;
 static int g_daemonize;
 static char *g_config_file = "osmo-gtpu-daemon.cfg";
 extern struct vty_app_info g_vty_info;
+
+static void signal_cb(struct osmo_signalfd *osfd, const struct signalfd_siginfo *fdsi)
+{
+	switch (fdsi->ssi_signo) {
+	case SIGCHLD:
+		sigchild_cb(osfd, fdsi);
+		break;
+	case SIGUSR1:
+		talloc_report_full(g_tall_ctx, stderr);
+		break;
+	default:
+		break;
+	}
+}
 
 static struct gtp_daemon *gtp_daemon_alloc(void *ctx)
 {
@@ -685,23 +700,23 @@ static const struct log_info log_info = {
 
 int main(int argc, char **argv)
 {
-	void *ctx = talloc_named_const(NULL, 0, "root");
 	int rc;
 
-	g_vty_info.tall_ctx = ctx;
+	g_tall_ctx = talloc_named_const(NULL, 0, "root");
+	g_vty_info.tall_ctx = g_tall_ctx;
 
 	osmo_init_ignore_signals();
-	osmo_init_logging2(ctx,  &log_info);
+	osmo_init_logging2(g_tall_ctx,  &log_info);
 
-	g_daemon = gtp_daemon_alloc(ctx);
+	g_daemon = gtp_daemon_alloc(g_tall_ctx);
 	OSMO_ASSERT(g_daemon);
 
-	osmo_stats_init(ctx);
+	osmo_stats_init(g_tall_ctx);
 	vty_init(&g_vty_info);
 	logging_vty_add_cmds();
 	osmo_talloc_vty_add_cmds();
 	osmo_stats_vty_add_cmds();
-	rate_ctr_init(ctx);
+	rate_ctr_init(g_tall_ctx);
 	gtpud_vty_init();
 
 	init_netns();
@@ -712,7 +727,7 @@ int main(int argc, char **argv)
 		exit(2);
 	}
 
-	rc = telnet_init_dynif(ctx, NULL, vty_get_bind_addr(), OSMO_VTY_PORT_UECUPS);
+	rc = telnet_init_dynif(g_daemon, NULL, vty_get_bind_addr(), OSMO_VTY_PORT_UECUPS);
 	if (rc < 0)
 		exit(1);
 
@@ -736,8 +751,10 @@ int main(int argc, char **argv)
 	sigset_t sigset;
 	sigemptyset(&sigset);
 	sigaddset(&sigset, SIGCHLD);
+	sigaddset(&sigset, SIGUSR1);
 	sigprocmask(SIG_BLOCK, &sigset, NULL);
-	g_daemon->signalfd = osmo_signalfd_setup(g_daemon, sigset, sigchild_cb, g_daemon);
+	g_daemon->signalfd = osmo_signalfd_setup(g_daemon, sigset, signal_cb, g_daemon);
+	osmo_init_ignore_signals();
 
 	if (g_daemonize) {
 		rc = osmo_daemonize();
