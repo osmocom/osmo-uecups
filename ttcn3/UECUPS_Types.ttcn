@@ -80,15 +80,26 @@ type record UECUPS_ProgramTermInd {
 	integer		exit_code
 };
 
+type record UeCUPS_ResetAllState {
+};
+
+type record UeCUPS_ResetAllStateRes {
+	UECUPS_Result	result
+};
 
 type union PDU_UECUPS {
 	UECUPS_CreateTun	create_tun,
 	UECUPS_CreateTunRes	create_tun_res,
+
 	UECUPS_DestroyTun	destroy_tun,
 	UECUPS_DestroyTunRes	destroy_tun_res,
+
 	UECUPS_StartProgram	start_program,
 	UECUPS_StartProgramRes	start_program_res,
-	UECUPS_ProgramTermInd	program_term_ind
+	UECUPS_ProgramTermInd	program_term_ind,
+
+	UeCUPS_ResetAllState	reset_all_state,
+	UeCUPS_ResetAllStateRes	reset_all_state_res
 };
 
 

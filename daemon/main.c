@@ -68,6 +68,14 @@ struct subprocess {
 	pid_t pid;
 };
 
+/* kill the specified subprocess and forget about it */
+static void subprocess_destroy(struct subprocess *p, int signal)
+{
+	kill(p->pid, signal);
+	llist_del(&p->list);
+	talloc_free(p);
+}
+
 /* Send JSON to a given client/connection */
 static int cups_client_tx_json(struct cups_client *cc, json_t *jtx)
 {
@@ -446,6 +454,29 @@ static int cups_client_handle_start_program(struct cups_client *cc, json_t *spro
 	return 0;
 }
 
+static int cups_client_handle_reset_all_state(struct cups_client *cc, json_t *sprog)
+{
+	struct gtp_daemon *d = cc->d;
+	struct gtp_tunnel *t, *t2;
+	struct subprocess *p, *p2;
+	json_t *jres;
+
+	pthread_rwlock_wrlock(&d->rwlock);
+	llist_for_each_entry_safe(t, t2, &d->gtp_tunnels, list) {
+		_gtp_tunnel_destroy(t);
+	}
+	pthread_rwlock_unlock(&d->rwlock);
+
+	/* no locking needed as this list is only used by main thread */
+	llist_for_each_entry_safe(p, p2, &d->subprocesses, list) {
+		subprocess_destroy(p, SIGKILL);
+	}
+
+	jres = gen_uecups_result("reset_all_state_res", "OK");
+	cups_client_tx_json(cc, jres);
+
+	return 0;
+}
 
 static int cups_client_handle_json(struct cups_client *cc, json_t *jroot)
 {
@@ -469,6 +500,8 @@ static int cups_client_handle_json(struct cups_client *cc, json_t *jroot)
 		rc = cups_client_handle_destroy_tun(cc, cmd);
 	} else if (!strcmp(key, "start_program")) {
 		rc = cups_client_handle_start_program(cc, cmd);
+	} else if (!strcmp(key, "reset_all_state")) {
+		rc = cups_client_handle_reset_all_state(cc, cmd);
 	} else {
 		LOGCC(cc, LOGL_NOTICE, "Unknown command '%s' received\n", key);
 		return -EINVAL;
@@ -551,12 +584,10 @@ static int cups_client_closed_cb(struct osmo_stream_srv *conn)
 	struct subprocess *p, *p2;
 
 	/* kill + forget about all subprocesses of this client */
+	/* We need no locking here as the subprocess list is only used from the main thread */
 	llist_for_each_entry_safe(p, p2, &d->subprocesses, list) {
-		if (p->cups_client == cc) {
-			kill(p->pid, SIGKILL);
-			llist_del(&p->list);
-			talloc_free(p);
-		}
+		if (p->cups_client == cc)
+			subprocess_destroy(p, SIGKILL);
 	}
 
 	LOGCC(cc, LOGL_INFO, "UECUPS connection lost\n");
