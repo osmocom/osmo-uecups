@@ -14,6 +14,7 @@ Build-Depends: debhelper (>=9),
                libnl-route-3-dev,
                libosmocore-dev (>= 1.1.0),
                libosmo-netif-dev,
+               libsctp-dev,
                osmo-gsm-manuals-dev
 Standards-Version: 3.9.8
 Vcs-Git: git://git.osmocom.org/osmo-uecups.git
