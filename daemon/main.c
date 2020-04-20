@@ -711,6 +711,7 @@ int main(int argc, char **argv)
 	g_daemon = gtp_daemon_alloc(g_tall_ctx);
 	OSMO_ASSERT(g_daemon);
 
+	msgb_talloc_ctx_init(g_tall_ctx, 10);
 	osmo_stats_init(g_tall_ctx);
 	vty_init(&g_vty_info);
 	logging_vty_add_cmds();
