@@ -6,6 +6,7 @@ ACLOCAL_AMFLAGS = -I m4
 
 SUBDIRS = \
 	daemon \
+	doc \
 	$(NULL)
 
 BUILT_SOURCES = $(top_srcdir)/.version

@@ -119,4 +119,6 @@ AC_MSG_RESULT([CPPFLAGS="$CPPFLAGS"])
 AC_OUTPUT(
 	Makefile
         daemon/Makefile
+	doc/Makefile
+	doc/examples/Makefile
         )
