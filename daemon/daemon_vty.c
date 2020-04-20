@@ -127,7 +127,7 @@ DEFUN(show_gtp, show_gtp_cmd,
 	"Local IP address\n" "Local UDP Port\n")
 {
 	struct gtp_endpoint *ep;
-	struct addrinfo *ai;
+	struct addrinfo *ai = NULL;
 	const char *ipstr;
 	uint16_t port = GTP1U_PORT;
 
