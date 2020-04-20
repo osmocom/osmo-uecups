@@ -631,7 +631,7 @@ static int cups_accept_cb(struct osmo_stream_srv_link *link, int fd)
 static void *g_tall_ctx;
 struct gtp_daemon *g_daemon;
 static int g_daemonize;
-static char *g_config_file = "osmo-gtpu-daemon.cfg";
+static char *g_config_file = "osmo-uecups-daemon.cfg";
 extern struct vty_app_info g_vty_info;
 
 static void signal_cb(struct osmo_signalfd *osfd, const struct signalfd_siginfo *fdsi)
