@@ -1,0 +1,2 @@
+/etc/osmocom/osmo-uecups-daemon.cfg
+usr/bin/osmo-uecups-daemon
