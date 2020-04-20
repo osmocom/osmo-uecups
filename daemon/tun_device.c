@@ -22,6 +22,7 @@
 #include <linux/if_tun.h>
 #include <sys/ioctl.h>
 
+#include <linux/netlink.h>
 #include <netlink/socket.h>
 #include <netlink/route/link.h>
 
