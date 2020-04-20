@@ -33,8 +33,15 @@ echo " =============================== osmo-uecups =============================
 echo
 set -x
 
-cd daemon
-make
+cd "$base"
+autoreconf --install --force
+./configure --enable-sanitize --enable-external-tests --enable-werror $CONFIG
+$MAKE $PARALLEL_MAKE
+LD_LIBRARY_PATH="$inst/lib" $MAKE check \
+	|| cat-testlogs.sh
+LD_LIBRARY_PATH="$inst/lib" \
+  DISTCHECK_CONFIGURE_FLAGS="--enable-vty-tests --enable-external-tests --enable-werror $CONFIG" \
+  $MAKE distcheck \
+  || cat-testlogs.sh
 
-osmo-clean-workspace.sh
-
+$MAKE maintainer-clean
