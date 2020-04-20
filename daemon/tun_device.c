@@ -204,7 +204,7 @@ static int tun_open(int flags, const char *name)
 	if (name) {
 		/* if a TUN interface name was specified, put it in the structure; otherwise,
 		   the kernel will try to allocate the "next" device of the specified type */
-		strncpy(ifr.ifr_name, name, IFNAMSIZ);
+		osmo_strlcpy(ifr.ifr_name, name, IFNAMSIZ);
 	}
 
 	/* try to create the device */

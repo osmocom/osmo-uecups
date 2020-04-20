@@ -83,6 +83,7 @@ out_unlock:
 	return NULL;
 }
 
+#if 0
 /* find tunnel by R(x_teid), T(x_teid) + A(ddr) */
 static struct gtp_tunnel *
 _gtp_tunnel_find_rta(struct gtp_daemon *d, uint32_t rx_teid, uint32_t tx_teid,
@@ -96,6 +97,7 @@ _gtp_tunnel_find_rta(struct gtp_daemon *d, uint32_t rx_teid, uint32_t tx_teid,
 	}
 	return NULL;
 }
+#endif
 
 /* find tunnel by R(x_teid) + optionally local endpoint */
 struct gtp_tunnel *

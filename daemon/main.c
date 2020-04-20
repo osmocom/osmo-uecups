@@ -378,7 +378,7 @@ static int cups_client_handle_start_program(struct cups_client *cc, json_t *spro
 	const char *cmd, *user;
 	char **addl_env = NULL;
 	sigset_t oldmask;
-	int nsfd, rc;
+	int nsfd = -1, rc;
 
 	juser = json_object_get(sprog, "run_as_user");
 	jcmd = json_object_get(sprog, "command");
