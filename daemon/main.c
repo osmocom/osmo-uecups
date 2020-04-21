@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/signalfd.h>
 #include <signal.h>
 #include <errno.h>
@@ -334,26 +335,22 @@ static struct subprocess *subprocess_by_pid(struct gtp_daemon *d, pid_t pid)
 	return NULL;
 }
 
-static void sigchild_cb(struct osmo_signalfd *osfd, const struct signalfd_siginfo *fdsi)
+static void child_terminated(struct gtp_daemon *d, int pid, int status)
 {
-	struct gtp_daemon *d = osfd->data;
 	struct subprocess *sproc;
 	json_t *jterm_ind;
 
-	OSMO_ASSERT(fdsi->ssi_signo == SIGCHLD);
+	LOGP(DUECUPS, LOGL_DEBUG, "SIGCHLD receive from pid %u; status=%d\n", pid, status);
 
-	LOGP(DUECUPS, LOGL_DEBUG, "SIGCHLD receive from pid %u; status=%d\n",
-		fdsi->ssi_pid, fdsi->ssi_status);
-
-	sproc = subprocess_by_pid(d, fdsi->ssi_pid);
+	sproc = subprocess_by_pid(d, pid);
 	if (!sproc) {
 		LOGP(DUECUPS, LOGL_NOTICE, "subprocess %u terminated (status=%d) but we don't know it?\n",
-			fdsi->ssi_pid, fdsi->ssi_status);
+			pid, status);
 		return;
 	}
 
-	/* FIXME: generate prog_term_ind towards control plane */
-	jterm_ind = gen_uecups_term_ind(fdsi->ssi_pid, fdsi->ssi_status);
+	/* generate prog_term_ind towards control plane */
+	jterm_ind = gen_uecups_term_ind(pid, status);
 	if (!jterm_ind)
 		return;
 
@@ -361,6 +358,28 @@ static void sigchild_cb(struct osmo_signalfd *osfd, const struct signalfd_siginf
 
 	llist_del(&sproc->list);
 	talloc_free(sproc);
+}
+
+static void sigchild_cb(struct osmo_signalfd *osfd, const struct signalfd_siginfo *fdsi)
+{
+	struct gtp_daemon *d = osfd->data;
+	int pid, status;
+
+	OSMO_ASSERT(fdsi->ssi_signo == SIGCHLD);
+
+	child_terminated(d, fdsi->ssi_pid, fdsi->ssi_status);
+
+	/* it is known that classic signals coalesce: If you get multiple signals of the
+	 * same type before a process is scheduled, the subsequent signaals are dropped.  This
+	 * makes sense for SIGINT or something like this, but for SIGCHLD carrying the PID of
+	 * the terminated process, it doesn't really.  Linux had the chance to fix this when
+	 * introducing signalfd() - but the developers decided not to fix it.  So the signalfd_siginfo
+	 * contains the PID of one process that terminated - but there may be any number of other
+	 * processes that also have terminated, and for which we don't get events this way. */
+
+	while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
+		child_terminated(d, pid, status);
+
 }
 
 static json_t *gen_uecups_start_res(pid_t pid, const char *result)
