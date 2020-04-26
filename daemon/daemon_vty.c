@@ -260,6 +260,39 @@ DEFUN(show_tunnel, show_tunnel_cmd,
 	return CMD_SUCCESS;
 }
 
+#define UECUPS_NODE	(_LAST_OSMOVTY_NODE+1)
+
+static struct cmd_node uecups_node = {
+	UECUPS_NODE,
+	"%s(config-uecups)# ",
+	1,
+};
+
+static int config_write_uecups(struct vty *vty)
+{
+	vty_out(vty, "uecups%s", VTY_NEWLINE);
+	vty_out(vty, " local-ip %s%s", g_daemon->cfg.cups_local_ip, VTY_NEWLINE);
+
+	return CMD_SUCCESS;
+}
+
+DEFUN(cfg_uecups, cfg_uecups_cmd,
+	"uecups",
+	"Configure the UE Control/User Plane Socket\n")
+{
+	vty->node = UECUPS_NODE;
+	return CMD_SUCCESS;
+}
+
+DEFUN(cfg_uecups_local_ip, cfg_uecups_local_ip_cmd,
+	"local-ip A.B.C.D",
+	"Set the IP address to which we bind locally\n"
+	"IP Address\n")
+{
+	osmo_talloc_replace_string(g_daemon, &g_daemon->cfg.cups_local_ip, argv[0]);
+	return CMD_SUCCESS;
+}
+
 
 int gtpud_vty_init(void)
 {
@@ -272,6 +305,10 @@ int gtpud_vty_init(void)
 	install_element(ENABLE_NODE, &gtp_destroy_cmd);
 
 	install_element_ve(&show_tunnel_cmd);
+
+	install_element(CONFIG_NODE, &cfg_uecups_cmd);
+	install_node(&uecups_node, config_write_uecups);
+	install_element(UECUPS_NODE, &cfg_uecups_local_ip_cmd);
 
 	return 0;
 }
