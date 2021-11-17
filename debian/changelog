@@ -1,3 +1,13 @@
+osmo-uecups (0.1.4) unstable; urgency=medium
+
+  [ Harald Welte ]
+  * daemon: Add VTY command to configure local bind IP of UECUPS socket
+
+  [ Oliver Smith ]
+  * configure: don't turn some warnings into errors
+
+ -- Pau Espin Pedrol <pespin@sysmocom.de>  Wed, 17 Nov 2021 17:41:19 +0100
+
 osmo-uecups (0.1.3) unstable; urgency=medium
 
   * debian: add dependency to autoconf-archive
