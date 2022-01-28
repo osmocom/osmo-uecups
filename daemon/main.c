@@ -726,6 +726,7 @@ int main(int argc, char **argv)
 
 	osmo_init_ignore_signals();
 	osmo_init_logging2(g_tall_ctx,  &log_info);
+	log_enable_multithread();
 
 	g_daemon = gtp_daemon_alloc(g_tall_ctx);
 	OSMO_ASSERT(g_daemon);
