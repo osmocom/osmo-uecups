@@ -290,13 +290,15 @@ _tun_device_create(struct gtp_daemon *d, const char *devname, const char *netns_
 	if (tun->netns_name) {
 		rc = netdev_add_defaultroute(tun->nl, tun->ifindex, AF_INET);
 		if (rc < 0)
-			LOGTUN(tun, LOGL_ERROR, "Cannot add IPv4 default route\n");
+			LOGTUN(tun, LOGL_ERROR, "Cannot add IPv4 default route "
+						"(rc=%d): %s\n", rc, nl_geterror(rc));
 		else
 			LOGTUN(tun, LOGL_INFO, "Added IPv4 default route\n");
 
 		rc = netdev_add_defaultroute(tun->nl, tun->ifindex, AF_INET6);
 		if (rc < 0)
-			LOGTUN(tun, LOGL_ERROR, "Cannot add IPv6 default route\n");
+			LOGTUN(tun, LOGL_ERROR, "Cannot add IPv6 default route "
+						"(rc=%d): %s\n", rc, nl_geterror(rc));
 		else
 			LOGTUN(tun, LOGL_INFO, "Added IPv6 default route\n");
 	}
