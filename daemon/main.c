@@ -370,7 +370,7 @@ static void sigchild_cb(struct osmo_signalfd *osfd, const struct signalfd_siginf
 	child_terminated(d, fdsi->ssi_pid, fdsi->ssi_status);
 
 	/* it is known that classic signals coalesce: If you get multiple signals of the
-	 * same type before a process is scheduled, the subsequent signaals are dropped.  This
+	 * same type before a process is scheduled, the subsequent signals are dropped.  This
 	 * makes sense for SIGINT or something like this, but for SIGCHLD carrying the PID of
 	 * the terminated process, it doesn't really.  Linux had the chance to fix this when
 	 * introducing signalfd() - but the developers decided not to fix it.  So the signalfd_siginfo
