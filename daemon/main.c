@@ -72,6 +72,8 @@ struct subprocess {
 /* kill the specified subprocess and forget about it */
 static void subprocess_destroy(struct subprocess *p, int signal)
 {
+	LOGCC(p->cups_client, LOGL_DEBUG, "Kill subprocess pid %llu with signal %u\n",
+		  (unsigned long long)p->pid, signal);
 	kill(p->pid, signal);
 	llist_del(&p->list);
 	talloc_free(p);
@@ -478,6 +480,7 @@ static int cups_client_handle_reset_all_state(struct cups_client *cc, json_t *sp
 	struct subprocess *p, *p2;
 	json_t *jres;
 
+	LOGCC(cc, LOGL_DEBUG, "Destroying all tunnels\n");
 	pthread_rwlock_wrlock(&d->rwlock);
 	llist_for_each_entry_safe(t, t2, &d->gtp_tunnels, list) {
 		_gtp_tunnel_destroy(t);
@@ -485,6 +488,7 @@ static int cups_client_handle_reset_all_state(struct cups_client *cc, json_t *sp
 	pthread_rwlock_unlock(&d->rwlock);
 
 	/* no locking needed as this list is only used by main thread */
+	LOGCC(cc, LOGL_DEBUG, "Destroying all subprocesses\n");
 	llist_for_each_entry_safe(p, p2, &d->subprocesses, list) {
 		subprocess_destroy(p, SIGKILL);
 	}
