@@ -58,6 +58,7 @@ struct cups_client {
 	/* client socket */
 	struct osmo_stream_srv *srv;
 	char sockname[OSMO_SOCK_NAME_MAXLEN];
+	bool reset_all_state_res_pending;
 };
 
 struct subprocess {
@@ -493,8 +494,12 @@ static int cups_client_handle_reset_all_state(struct cups_client *cc, json_t *sp
 		subprocess_destroy(p, SIGKILL);
 	}
 
-	jres = gen_uecups_result("reset_all_state_res", "OK");
-	cups_client_tx_json(cc, jres);
+	if (d->reset_all_state_tun_remaining == 0) {
+		jres = gen_uecups_result("reset_all_state_res", "OK");
+		cups_client_tx_json(cc, jres);
+	} else {
+		cc->reset_all_state_res_pending = true;
+	}
 
 	return 0;
 }
@@ -669,6 +674,31 @@ static void signal_cb(struct osmo_signalfd *osfd, const struct signalfd_siginfo 
 	}
 }
 
+static void gtp_daemon_itq_read_cb(struct osmo_it_q *q, struct llist_head *item)
+{
+	struct gtp_daemon *d = (struct gtp_daemon *)q->data;
+	struct gtp_daemon_itq_msg *itq_msg = container_of(item, struct gtp_daemon_itq_msg, list);
+
+	LOGP(DTUN, LOGL_DEBUG, "Rx new itq message from %s\n",
+		 itq_msg->tun_released.tun->devname);
+
+	_tun_device_destroy(itq_msg->tun_released.tun);
+	if (d->reset_all_state_tun_remaining > 0) {
+		d->reset_all_state_tun_remaining--;
+		if (d->reset_all_state_tun_remaining == 0) {
+			struct cups_client *cc;
+			llist_for_each_entry(cc, &d->cups_clients, list) {
+				json_t *jres;
+				if (!cc->reset_all_state_res_pending)
+					continue;
+				cc->reset_all_state_res_pending = false;
+				jres = gen_uecups_result("reset_all_state_res", "OK");
+				cups_client_tx_json(cc, jres);
+			}
+		}
+	}
+}
+
 static struct gtp_daemon *gtp_daemon_alloc(void *ctx)
 {
 	struct gtp_daemon *d = talloc_zero(ctx, struct gtp_daemon);
@@ -681,6 +711,9 @@ static struct gtp_daemon *gtp_daemon_alloc(void *ctx)
 	INIT_LLIST_HEAD(&d->subprocesses);
 	pthread_rwlock_init(&d->rwlock, NULL);
 	d->main_thread = pthread_self();
+
+	d->itq = osmo_it_q_alloc(d, "itq", 4096, gtp_daemon_itq_read_cb, d);
+	osmo_fd_register(&d->itq->event_ofd);
 
 	INIT_LLIST_HEAD(&d->cups_clients);
 

@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <osmocom/core/linuxlist.h>
 #include <osmocom/core/write_queue.h>
+#include <osmocom/core/it_q.h>
 #include <osmocom/core/utils.h>
 
 struct nl_sock;
@@ -84,6 +85,13 @@ bool gtp_endpoint_release(struct gtp_endpoint *ep);
 /***********************************************************************
  * TUN Device
  ***********************************************************************/
+/* Message sent tun thread -> main thread through osmo_itq */
+struct gtp_daemon_itq_msg {
+	struct llist_head list;
+	struct {
+		struct tun_device *tun;
+	} tun_released; /* tun became stopped and can be freed */
+};
 
 struct tun_device {
 	/* entry in global list */
@@ -110,6 +118,9 @@ struct tun_device {
 
 	/* the thread handling Rx from the tun fd */
 	pthread_t thread;
+
+	/* Used to store messages to be sent to main thread, since tun thread doesn't allocate through talloc */
+	struct gtp_daemon_itq_msg itq_msg;
 };
 
 struct tun_device *
@@ -121,9 +132,10 @@ tun_device_find_netns(struct gtp_daemon *d, const char *netns_name);
 struct tun_device *
 _tun_device_find(struct gtp_daemon *d, const char *devname);
 
-void _tun_device_deref_destroy(struct tun_device *tun);
+void _tun_device_destroy(struct tun_device *tun);
 
 bool _tun_device_release(struct tun_device *tun);
+void _tun_device_deref_release(struct tun_device *tun);
 
 bool tun_device_release(struct tun_device *tun);
 
@@ -221,6 +233,12 @@ struct gtp_daemon {
 	struct llist_head cups_clients;
 	struct osmo_stream_srv_link *cups_link;
 	struct osmo_signalfd *signalfd;
+
+	/* inter-thread queue between main thread and workers, pass struct gtp_daemon_itq_msg: */
+	struct osmo_it_q *itq;
+
+	/* Number of tunnels in progrress of being released: */
+	unsigned int reset_all_state_tun_remaining;
 
 	struct {
 		char *cups_local_ip;

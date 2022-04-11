@@ -120,6 +120,14 @@ static int parse_pkt(struct pkt_info *out, const uint8_t *in, unsigned int in_le
 	return 0;
 }
 
+static void tun_device_pthread_cleanup_routine(void *data)
+{
+	struct tun_device *tun = data;
+	LOGTUN(tun, LOGL_DEBUG, "pthread_cleanup\n");
+	int rc = osmo_it_q_enqueue(tun->d->itq, &tun->itq_msg, list);
+	OSMO_ASSERT(rc == 0);
+}
+
 /* one thread for reading from each TUN device (TUN -> GTP encapsulation) */
 static void *tun_device_thread(void *arg)
 {
@@ -135,6 +143,8 @@ static void *tun_device_thread(void *arg)
 	/* initialize the fixed part of the GTP header */
 	gtph->flags = 0x30;
 	gtph->type = GTP_TPDU;
+
+	pthread_cleanup_push(tun_device_pthread_cleanup_routine, tun);
 
 	while (1) {
 		struct gtp_tunnel *t;
@@ -187,6 +197,7 @@ static void *tun_device_thread(void *arg)
 			exit(1);
 		}
 	}
+	pthread_cleanup_pop(1);
 }
 
 static int tun_open(int flags, const char *name)
@@ -376,24 +387,24 @@ tun_device_find_or_create(struct gtp_daemon *d, const char *devname, const char 
 	return tun;
 }
 
-/* UNLOCKED hard/forced destroy; caller must make sure references are cleaned up */
-static void _tun_device_destroy(struct tun_device *tun)
+/* UNLOCKED hard/forced destroy; caller must make sure references are cleaned
+ * up, and tun thread is stopped beforehand by calling
+ * _tun_device_{deref_}release */
+void _tun_device_destroy(struct tun_device *tun)
 {
 	/* talloc is not thread safe, all alloc/free must come from main thread */
 	ASSERT_MAIN_THREAD(tun->d);
+	LOGTUN(tun, LOGL_INFO, "Destroying\n");
 
-	pthread_cancel(tun->thread);
-	llist_del(&tun->list);
 	if (tun->netns_name)
 		close(tun->netns_fd);
 	close(tun->fd);
 	nl_socket_free(tun->nl);
-	LOGTUN(tun, LOGL_INFO, "Destroying\n");
 	talloc_free(tun);
 }
 
-/* UNLOCKED remove all objects referencing this tun and then destroy */
-void _tun_device_deref_destroy(struct tun_device *tun)
+/* UNLOCKED remove all objects referencing this tun and then start async tun release procedure */
+void _tun_device_deref_release(struct tun_device *tun)
 {
 	struct gtp_daemon *d = tun->d;
 	char *devname = talloc_strdup(d, tun->devname);
@@ -412,12 +423,12 @@ void _tun_device_deref_destroy(struct tun_device *tun)
 	 * check if the tun can still be found in the list */
 	tun2 = _tun_device_find(d, devname);
 	if (tun2 && tun2 == tun)
-		_tun_device_destroy(tun2);
+		_tun_device_release(tun2);
 
 	talloc_free(devname);
 }
 
-/* UNLOCKED release a reference; destroy if refcount drops to 0 */
+/* UNLOCKED release a reference; start async tun release procedure if refcount drops to 0 */
 bool _tun_device_release(struct tun_device *tun)
 {
 	bool released = false;
@@ -427,10 +438,17 @@ bool _tun_device_release(struct tun_device *tun)
 
 	tun->use_count--;
 	if (tun->use_count == 0) {
-		_tun_device_destroy(tun);
+		LOGTUN(tun, LOGL_INFO, "Releasing\n");
+		llist_del(&tun->list);
+		tun->itq_msg.tun_released.tun = tun;
+		tun->d->reset_all_state_tun_remaining++;
+		/* We cancel the thread: the pthread_cleanup routing will send a message
+		 * back to us (main thread) when finally cancelled. */
+		pthread_cancel(tun->thread);
 		released = true;
-	} else
+	} else {
 		LOGTUN(tun, LOGL_DEBUG, "Release; new use_count=%lu\n", tun->use_count);
+	}
 
 	return released;
 }

@@ -99,7 +99,7 @@ DEFUN(tun_destroy, tun_destroy_cmd,
 		vty_out(vty, "Cannot destrory non-existant TUN%s", VTY_NEWLINE);
 		return CMD_WARNING;
 	}
-	_tun_device_deref_destroy(tun);
+	_tun_device_deref_release(tun);
 	pthread_rwlock_unlock(&g_daemon->rwlock);
 
 	return CMD_SUCCESS;
