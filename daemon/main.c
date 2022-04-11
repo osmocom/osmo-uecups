@@ -367,8 +367,6 @@ static void sigchild_cb(struct osmo_signalfd *osfd, const struct signalfd_siginf
 
 	OSMO_ASSERT(fdsi->ssi_signo == SIGCHLD);
 
-	child_terminated(d, fdsi->ssi_pid, fdsi->ssi_status);
-
 	/* it is known that classic signals coalesce: If you get multiple signals of the
 	 * same type before a process is scheduled, the subsequent signals are dropped.  This
 	 * makes sense for SIGINT or something like this, but for SIGCHLD carrying the PID of
