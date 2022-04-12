@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+#define _GNU_SOURCE
+#include <getopt.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -752,6 +754,98 @@ static const struct log_info log_info = {
 	.num_cat = ARRAY_SIZE(log_categories),
 };
 
+static void print_help()
+{
+	printf("Some useful options:\n");
+	printf(" -h --help is printing this text.\n");
+	printf(" -c --config-file filename The config file to use.\n");
+	printf(" -s --disable-color\n");
+	printf(" -D --daemonize Fork the process into a background daemon\n");
+	printf(" -V --version Print the version number\n");
+
+	printf("\nVTY reference generation:\n");
+	printf("    --vty-ref-mode MODE		VTY reference generation mode (e.g. 'expert').\n");
+	printf("    --vty-ref-xml		Generate the VTY reference XML output and exit.\n");
+}
+
+static void handle_long_options(const char *prog_name, const int long_option)
+{
+	static int vty_ref_mode = VTY_REF_GEN_MODE_DEFAULT;
+
+	switch (long_option) {
+	case 1:
+		vty_ref_mode = get_string_value(vty_ref_gen_mode_names, optarg);
+		if (vty_ref_mode < 0) {
+			fprintf(stderr, "%s: Unknown VTY reference generation "
+				"mode '%s'\n", prog_name, optarg);
+			exit(2);
+		}
+		break;
+	case 2:
+		fprintf(stderr, "Generating the VTY reference in mode '%s' (%s)\n",
+			get_value_string(vty_ref_gen_mode_names, vty_ref_mode),
+			get_value_string(vty_ref_gen_mode_desc, vty_ref_mode));
+		vty_dump_xml_ref_mode(stdout, (enum vty_ref_gen_mode) vty_ref_mode);
+		exit(0);
+	default:
+		fprintf(stderr, "%s: error parsing cmdline options\n", prog_name);
+		exit(2);
+	}
+}
+
+static void handle_options(int argc, char **argv)
+{
+	while (1) {
+		int option_index = 0, c;
+		static int long_option = 0;
+		static struct option long_options[] = {
+			{"help", 0, 0, 'h'},
+			{"config-file", 1, 0, 'c'},
+			{"daemonize", 0, 0, 'D'},
+			{"version", 0, 0, 'V'},
+			{"disable-color", 0, 0, 's'},
+			{"vty-ref-mode", 1, &long_option, 1},
+			{"vty-ref-xml", 0, &long_option, 2},
+			{0, 0, 0, 0},
+		};
+
+		c = getopt_long(argc, argv, "hc:sVD", long_options, &option_index);
+
+		if (c == -1)
+			break;
+
+		switch (c) {
+		case 'h':
+			print_help();
+			exit(0);
+			break;
+		case 0:
+			handle_long_options(argv[0], long_option);
+			break;
+		case 'c':
+			g_config_file = talloc_strdup(g_tall_ctx, optarg);
+			break;
+		case 's':
+			log_set_use_color(osmo_stderr_target, 0);
+			break;
+		case 'V':
+			print_version(1);
+			exit(0);
+			break;
+		case 'D':
+			g_daemonize = 1;
+			break;
+		default:
+			/* ignore */
+			break;
+		};
+	}
+	if (argc > optind) {
+		fprintf(stderr, "Unsupported positional arguments on command line\n");
+		exit(2);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	int rc;
@@ -774,6 +868,8 @@ int main(int argc, char **argv)
 	osmo_stats_vty_add_cmds();
 	rate_ctr_init(g_tall_ctx);
 	gtpud_vty_init();
+
+	handle_options(argc, argv);
 
 	init_netns();
 
