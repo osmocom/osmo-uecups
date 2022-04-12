@@ -1,14 +1,22 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #pragma once
 
+#include "netns.h"
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
 #include <sys/socket.h>
+
+#include <jansson.h>
+
 #include <osmocom/core/linuxlist.h>
 #include <osmocom/core/write_queue.h>
 #include <osmocom/core/it_q.h>
 #include <osmocom/core/utils.h>
+#include <osmocom/core/socket.h>
+
+#include <osmocom/netif/stream.h>
 
 struct nl_sock;
 struct osmo_stream_srv_link;
@@ -140,6 +148,25 @@ void _tun_device_deref_release(struct tun_device *tun);
 bool tun_device_release(struct tun_device *tun);
 
 
+/***********************************************************************
+ * Client (Control/User Plane Separation) Socket
+ ***********************************************************************/
+
+struct cups_client {
+	/* member in daemon->cups_clients */
+	struct llist_head list;
+	/* back-pointer to daemon */
+	struct gtp_daemon *d;
+	/* client socket */
+	struct osmo_stream_srv *srv;
+	char sockname[OSMO_SOCK_NAME_MAXLEN];
+	bool reset_all_state_res_pending;
+};
+
+struct osmo_stream_srv_link *cups_srv_link_create(struct gtp_daemon *d);
+void child_terminated(struct gtp_daemon *d, int pid, int status);
+json_t *gen_uecups_result(const char *name, const char *res);
+int cups_client_tx_json(struct cups_client *cc, json_t *jtx);
 
 /***********************************************************************
  * GTP Tunnel
@@ -246,5 +273,7 @@ struct gtp_daemon {
 	} cfg;
 };
 extern struct gtp_daemon *g_daemon;
+
+struct gtp_daemon *gtp_daemon_alloc(void *ctx);
 
 int gtpud_vty_init(void);
