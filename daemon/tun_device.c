@@ -139,12 +139,17 @@ static void *tun_device_thread(void *arg)
 	uint8_t *buffer = base_buffer + sizeof(struct gtp1_header);
 
 	struct sockaddr_storage daddr;
+	int old_cancelst_unused;
 
 	/* initialize the fixed part of the GTP header */
 	gtph->flags = 0x30;
 	gtph->type = GTP_TPDU;
 
 	pthread_cleanup_push(tun_device_pthread_cleanup_routine, tun);
+	/* IMPORTANT!: All logging functions in this function block must be called with
+	 * PTHREAD_CANCEL_DISABLE set, otherwise the thread could be cancelled while
+	 * holding the logging mutex, hence causing deadlock with main (or other)
+	 * thread. */
 
 	while (1) {
 		struct gtp_tunnel *t;
@@ -154,6 +159,7 @@ static void *tun_device_thread(void *arg)
 		/* 1) read from tun */
 		rc = read(tun->fd, buffer, MAX_UDP_PACKET);
 		if (rc < 0) {
+			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelst_unused);
 			LOGTUN(tun, LOGL_FATAL, "Error readingfrom tun device: %s\n", strerror(errno));
 			exit(1);
 		}
@@ -162,8 +168,10 @@ static void *tun_device_thread(void *arg)
 
 		rc = parse_pkt(&pinfo, buffer, nread);
 		if (rc < 0) {
+			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelst_unused);
 			LOGTUN(tun, LOGL_NOTICE, "Error parsing IP packet: %s\n",
 				osmo_hexdump(buffer, nread));
+			pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &old_cancelst_unused);
 			continue;
 		}
 
@@ -181,7 +189,9 @@ static void *tun_device_thread(void *arg)
 			getnameinfo((const struct sockaddr *)&pinfo.saddr,
 				    sizeof(pinfo.saddr), host, sizeof(host), port, sizeof(port),
 				    NI_NUMERICHOST | NI_NUMERICSERV);
+			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelst_unused);
 			LOGTUN(tun, LOGL_NOTICE, "No tunnel found for source address %s:%s\n", host, port);
+			pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &old_cancelst_unused);
 			continue;
 		}
 		outfd = t->gtp_ep->fd;
@@ -193,6 +203,7 @@ static void *tun_device_thread(void *arg)
 		rc = sendto(outfd, base_buffer, nread+sizeof(*gtph), 0,
 			    (struct sockaddr *)&daddr, sizeof(daddr));
 		if (rc < 0) {
+			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelst_unused);
 			LOGTUN(tun, LOGL_FATAL, "Error Writing to UDP socket: %s\n", strerror(errno));
 			exit(1);
 		}
