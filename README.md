@@ -62,5 +62,5 @@ contributions.  Please see
 https://osmocom.org/projects/cellular-infrastructure/wiki/Gerrit for
 more details
 
-The current patch queue for osmo-bts can be seen at
+The current patch queue for osmo-uecups can be seen at
 https://gerrit.osmocom.org/#/q/project:osmo-uecups+status:open
