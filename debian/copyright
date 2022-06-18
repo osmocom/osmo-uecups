@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: osmo-uecups
-Source: git://git.osmocom.org/osmo-uecups
+Source: https://gitea.osmocom.org/cellular-infrastructure/osmo-uecups
 
 Files:     *
 Copyright: 2019-2020 Harald Welte <laforge@osmocom.org>

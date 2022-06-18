@@ -30,9 +30,9 @@ GIT Repository
 
 You can clone from the official osmo-bts.git repository using
 
-	git clone git://git.osmocom.org/osmo-uecups.git
+	git clone https://gitea.osmocom.org/cellular-infrastructure/osmo-uecups
 
-There is a cgit interface at httsp://git.osmocom.org/osmo-uecups/
+There is a web interface at <https://gitea.osmocom.org/cellular-infrastructure/osmo-uecups>
 
 Documentation
 -------------
