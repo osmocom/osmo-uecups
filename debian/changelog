@@ -1,3 +1,14 @@
+osmo-uecups (0.2.1) unstable; urgency=medium
+
+  [ Max ]
+  * Add git-review config
+
+  [ Harald Welte ]
+  * add spec.in file for RPM building
+  * fix copy+paste mistake in README.md
+
+ -- Pau Espin Pedrol <pespin@sysmocom.de>  Tue, 07 Feb 2023 17:45:20 +0100
+
 osmo-uecups (0.2.0) unstable; urgency=medium
 
   [ Pau Espin Pedrol ]
