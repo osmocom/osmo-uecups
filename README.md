@@ -37,7 +37,87 @@ There is a web interface at <https://gitea.osmocom.org/cellular-infrastructure/o
 Documentation
 -------------
 
-FIXME
+Please check the PGW test suite we have at
+https://gitea.osmocom.org/ttcn3/osmo-ttcn3-hacks/src/branch/master/pgw
+for a full example.  This test suite implements the signaling plane of
+simulating UE/MME/SGW towards a PGW (device under test).  It uses
+osmo-uecups to simulate the user plane and start commands like "ping"
+within the netns of the simulated UE.
+
+The interface between test suite and osmo-uecups is using
+JSON-serialized commands via a SCTP socket on SCTP port 4268.
+
+JSON Examples from the above PGW tests suite execution look like below.  You can find a pcap file containing this example communication in contrib/osmo-uecups-example.pcap
+
+### Initial reset of state:
+
+Request to osmo-uecups:
+```
+{"reset_all_state":{}}
+```
+
+Response from osmo-uecups:
+```
+{"reset_all_state_res": {"result": "OK"}}
+```
+
+### Creating a GTP tunnel / UE with its own tun-device in its own netns
+
+Request to osmo-uecups:
+```
+{
+   "create_tun" : {
+      "local_gtp_ep" : {
+         "Port" : 2152,
+         "addr_type" : "IPV4",
+         "ip" : "AC121B14"
+      },
+      "remote_gtp_ep" : {
+         "Port" : 2152,
+         "addr_type" : "IPV4",
+         "ip" : "AC121B07"
+      },
+      "rx_teid" : 2029948341,
+      "tun_dev_name" : "tun23",
+      "tun_netns_name" : "tun23",
+      "tx_teid" : 6,
+      "user_addr" : "0A2D0003",
+      "user_addr_type" : "IPV4"
+   }
+}
+```
+
+Response from osmo-uecups:
+```
+{"create_tun_res": {"result": "OK"}}
+```
+
+### Running a test program (here "ping") inside that netns, just as if the command was executed on the UE
+
+
+Request to osmo-uecups:
+```
+{
+   "start_program" : {
+      "command" : "ping -c 10 -i 1 -I 10.45.0.3 10.45.0.1 1>>/data/TC_createSession_ping4.prog.stdout 2>>/data/TC_createSession_ping4.prog.stderr",
+      "environment" : [],
+      "run_as_user" : "osmocom",
+      "tun_netns_name" : "tun23"
+   }
+}
+```
+
+Initial Response from osmo-uecups (program was started):
+```
+{"start_program_res": {"pid": 12, "result": "OK"}}
+```
+
+Final response from osmo-uecups (program terminated):
+```
+{"program_term_ind": {"exit_code": 0, "pid": 12}}
+```
+
+
 
 Mailing List
 ------------
