@@ -28,7 +28,7 @@ https://osmocom.org/projects/osmo-ggsn/wiki/osmo-uecups
 GIT Repository
 --------------
 
-You can clone from the official osmo-bts.git repository using
+You can clone from the official osmo-uecups.git repository using
 
 	git clone https://gitea.osmocom.org/cellular-infrastructure/osmo-uecups
 
