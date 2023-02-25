@@ -234,7 +234,7 @@ int main(int argc, char **argv)
 		exit(2);
 	}
 
-	rc = telnet_init_dynif(g_daemon, NULL, vty_get_bind_addr(), OSMO_VTY_PORT_UECUPS);
+	rc = telnet_init_default(g_daemon, NULL, OSMO_VTY_PORT_UECUPS);
 	if (rc < 0)
 		exit(1);
 
