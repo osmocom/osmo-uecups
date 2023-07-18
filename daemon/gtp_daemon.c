@@ -54,6 +54,7 @@ static void gtp_daemon_itq_read_cb(struct osmo_it_q *q, struct llist_head *item)
 
 struct gtp_daemon *gtp_daemon_alloc(void *ctx)
 {
+	int rc;
 	struct gtp_daemon *d = talloc_zero(ctx, struct gtp_daemon);
 	if (!d)
 		return NULL;
@@ -66,7 +67,12 @@ struct gtp_daemon *gtp_daemon_alloc(void *ctx)
 	d->main_thread = pthread_self();
 
 	d->itq = osmo_it_q_alloc(d, "itq", 4096, gtp_daemon_itq_read_cb, d);
-	osmo_fd_register(&d->itq->event_ofd);
+	if (!d->itq)
+		goto out_free;
+
+	rc = osmo_fd_register(&d->itq->event_ofd);
+	if (rc < 0)
+		goto out_free_q;
 
 	INIT_LLIST_HEAD(&d->cups_clients);
 
@@ -74,4 +80,10 @@ struct gtp_daemon *gtp_daemon_alloc(void *ctx)
 	d->cfg.cups_local_port = UECUPS_SCTP_PORT;
 
 	return d;
+
+out_free_q:
+	osmo_it_q_destroy(d->itq);
+out_free:
+	talloc_free(d);
+	return NULL;
 }
