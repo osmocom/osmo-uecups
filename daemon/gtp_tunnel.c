@@ -28,7 +28,7 @@ struct gtp_tunnel *gtp_tunnel_alloc(struct gtp_daemon *d, const struct gtp_tunne
 
 	t = talloc_zero(d, struct gtp_tunnel);
 	if (!t)
-		goto out_unlock;
+		goto out;
 	t->d = d;
 	t->name = talloc_asprintf(t, "%s-R%08x-T%08x", cpars->tun_name, cpars->rx_teid, cpars->tx_teid);
 	t->tun_dev = tun_device_find_or_create(d, cpars->tun_name, cpars->tun_netns_name);
@@ -72,14 +72,13 @@ struct gtp_tunnel *gtp_tunnel_alloc(struct gtp_daemon *d, const struct gtp_tunne
 	return t;
 
 out_ep:
+	pthread_rwlock_unlock(&d->rwlock);
 	_gtp_endpoint_release(t->gtp_ep);
 out_tun:
 	_tun_device_release(t->tun_dev);
 out_free:
 	talloc_free(t);
-out_unlock:
-	pthread_rwlock_unlock(&d->rwlock);
-
+out:
 	return NULL;
 }
 
