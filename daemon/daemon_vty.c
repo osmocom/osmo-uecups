@@ -145,7 +145,7 @@ DEFUN(show_gtp, show_gtp_cmd,
 
 	show_ep_hdr(vty);
 	pthread_rwlock_rdlock(&g_daemon->rwlock);
-	if (argc) {
+	if (argc > 0) {
 		ep = _gtp_endpoint_find(g_daemon, (const struct sockaddr_storage *) ai->ai_addr);
 		if (!ep) {
 			pthread_rwlock_unlock(&g_daemon->rwlock);
