@@ -31,4 +31,6 @@ configure~
 ttcn3/*.cc
 ttcn3/*.hh
 
+contrib/osmo-uecups.spec
 daemon/osmo-uecups-daemon
+
