@@ -109,5 +109,4 @@ AC_OUTPUT(
         daemon/Makefile
 	doc/Makefile
 	doc/examples/Makefile
-	contrib/osmo-uecups.spec
         )

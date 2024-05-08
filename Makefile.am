@@ -10,7 +10,7 @@ SUBDIRS = \
 	$(NULL)
 
 BUILT_SOURCES = $(top_srcdir)/.version
-EXTRA_DIST = git-version-gen .version contrib/osmo-uecups.spec.in
+EXTRA_DIST = git-version-gen .version
 
 @RELMAKE@
 
