@@ -181,6 +181,18 @@ int cups_client_tx_json(struct cups_client *cc, json_t *jtx);
  *    this is what happens when IP arrives on the tun device
  */
 
+struct gtp1u_exthdr_pdu_sess_container {
+	bool enabled;
+	uint8_t pdu_type; /* GTP1_EXTHDR_PDU_TYPE_* */
+	uint8_t qos_flow_identifier;
+};
+
+struct gtp1u_exthdrs {
+	bool seq_num_enabled;
+	bool n_pdu_num_enabled;
+	struct gtp1u_exthdr_pdu_sess_container pdu_sess_container;
+};
+
 struct gtp_tunnel {
 	/* entry in global list / hash table */
 	struct llist_head list;
@@ -205,6 +217,9 @@ struct gtp_tunnel {
 	/* Remote UDP IP/Port*/
 	struct sockaddr_storage remote_udp;
 
+	/* GTP Extension Header */
+	struct gtp1u_exthdrs exthdr;
+
 	/* TODO: Filter */
 };
 
@@ -218,6 +233,9 @@ struct gtp_tunnel_params {
 	/* TEID in receive and transmit direction */
 	uint32_t rx_teid;
 	uint32_t tx_teid;
+
+	/* GTPv1U Extension Headers: */
+	struct gtp1u_exthdrs exthdr;
 
 	/* end user address */
 	struct sockaddr_storage user_addr;

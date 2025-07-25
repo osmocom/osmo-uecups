@@ -22,23 +22,37 @@ type record UECUPS_SockAddr {
 	uint16_t	Port
 };
 
+const charstring UECUPS_GtpExtHdr_PduSessContainer_Type_ul_pdu_sess_info := "ul_pdu_sess_info";
+const charstring UECUPS_GtpExtHdr_PduSessContainer_Type_dl_pdu_sess_info := "dl_pdu_sess_info";
+type record UECUPS_GtpExtHdr_PduSessContainer {
+	charstring pdu_type, /* ("ul_pdu_sess_info"|"dl_pdu_sess_info") */
+	uint32_t qfi
+};
+
+type record UECUPS_GtpExtHdr {
+	boolean 				sequence_number optional,
+	boolean 				n_pdu_number optional,
+	UECUPS_GtpExtHdr_PduSessContainer	pdu_session_container optional
+};
+
 /* Create a new GTP-U tunnel in the user plane */
 type record UECUPS_CreateTun {
 	/* TEID in transmit + receive direction */
-	uint32_t	tx_teid,
-	uint32_t	rx_teid,
+	uint32_t		tx_teid,
+	uint32_t		rx_teid,
 
 	/* user address (allocated inside the tunnel) */
-	UECUPS_AddrType user_addr_type,
-	OCT4_16n	user_addr,
+	UECUPS_AddrType 	user_addr_type,
+	OCT4_16n		user_addr,
 
 	/* GTP endpoint (UDP IP/Port tuples) */
-	UECUPS_SockAddr local_gtp_ep,
-	UECUPS_SockAddr remote_gtp_ep,
+	UECUPS_SockAddr 	local_gtp_ep,
+	UECUPS_SockAddr 	remote_gtp_ep,
 
 	/* TUN device */
-	charstring	tun_dev_name,
-	charstring	tun_netns_name optional
+	charstring		tun_dev_name,
+	charstring		tun_netns_name optional,
+	UECUPS_GtpExtHdr	gtp_ext_hdr optional
 };
 
 type record UECUPS_CreateTunRes {
@@ -128,6 +142,24 @@ ts_UECUPS_SockAddr(OCT4_16n ip, uint16_t Port := GTP1U_PORT) := {
 	Port := Port
 }
 
+template (value) UECUPS_GtpExtHdr_PduSessContainer
+ts_UECUPS_GtpExtHdr_PduSessContainer(template (value) charstring pdu_type,
+				     template (value) uint32_t qfi)
+:= {
+	pdu_type := pdu_type,
+	qfi := qfi
+};
+
+template (value) UECUPS_GtpExtHdr
+ts_UECUPS_GtpExtHdr(template (omit) boolean sequence_number := omit,
+		    template (omit) boolean n_pdu_number := omit,
+		    template (omit) UECUPS_GtpExtHdr_PduSessContainer pdu_session_container := omit)
+:= {
+	sequence_number := sequence_number,
+	n_pdu_number := n_pdu_number,
+	pdu_session_container := pdu_session_container
+};
+
 template (value) UECUPS_CreateTun
 ts_UECUPS_CreateTun(template (value) uint32_t tx_teid,
 		    template (value) uint32_t rx_teid,
@@ -136,7 +168,8 @@ ts_UECUPS_CreateTun(template (value) uint32_t tx_teid,
 		    template (value) UECUPS_SockAddr local_gtp_ep,
 		    template (value) UECUPS_SockAddr remote_gtp_ep,
 		    template (value) charstring tun_dev_name := "tun",
-		    template (omit) charstring tun_netns_name := omit)
+		    template (omit) charstring tun_netns_name := omit,
+		    template (omit) UECUPS_GtpExtHdr gtp_ext_hdr := omit)
 := {
 	tx_teid := tx_teid,
 	rx_teid := rx_teid,
@@ -145,7 +178,8 @@ ts_UECUPS_CreateTun(template (value) uint32_t tx_teid,
 	local_gtp_ep := local_gtp_ep,
 	remote_gtp_ep := remote_gtp_ep,
 	tun_dev_name := tun_dev_name,
-	tun_netns_name := tun_netns_name
+	tun_netns_name := tun_netns_name,
+	gtp_ext_hdr := gtp_ext_hdr
 };
 
 template (value) UECUPS_DestroyTun

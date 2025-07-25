@@ -56,6 +56,7 @@ struct gtp_tunnel *gtp_tunnel_alloc(struct gtp_daemon *d, const struct gtp_tunne
 
 	t->rx_teid = cpars->rx_teid;
 	t->tx_teid = cpars->tx_teid;
+	memcpy(&t->exthdr, &cpars->exthdr, sizeof(t->exthdr));
 	memcpy(&t->user_addr, &cpars->user_addr, sizeof(t->user_addr));
 	memcpy(&t->remote_udp, &cpars->remote_udp, sizeof(t->remote_udp));
 

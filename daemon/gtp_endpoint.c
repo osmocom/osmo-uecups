@@ -27,19 +27,98 @@
  * GTP Endpoint (UDP socket)
  ***********************************************************************/
 
+static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigned int nread)
+{
+	struct gtp_daemon *d = ep->d;
+	struct gtp_tunnel *t;
+	const struct gtp1_header *gtph;
+	const uint8_t *payload;
+	int rc, outfd;
+	uint32_t teid;
+	uint16_t gtp_len;
+
+	if (nread < sizeof(*gtph)) {
+		LOGEP(ep, LOGL_NOTICE, "Short read: %u < %lu\n", nread, sizeof(*gtph));
+		return;
+	}
+	gtph = (struct gtp1_header *)buffer;
+
+	/* check GTP header contents */
+	if ((gtph->flags & 0xf0) != 0x30) {
+		LOGEP(ep, LOGL_NOTICE, "Unexpected GTP Flags: 0x%02x\n", gtph->flags);
+		return;
+	}
+	if (gtph->type != GTP_TPDU) {
+		LOGEP(ep, LOGL_NOTICE, "Unexpected GTP Message Type: 0x%02x\n", gtph->type);
+		return;
+	}
+
+	gtp_len = ntohs(gtph->length);
+	if (sizeof(*gtph)+gtp_len > nread) {
+		LOGEP(ep, LOGL_NOTICE, "Short GTP Message: %lu < len=%u\n",
+			sizeof(*gtph)+gtp_len, nread);
+		return;
+	}
+	teid = ntohl(gtph->tid);
+
+	payload = buffer + sizeof(*gtph);
+	if (gtph->flags & GTP1_F_MASK) {
+		const struct gtp1_exthdr *exthdr = (const struct gtp1_exthdr *)payload;
+		if (gtp_len < 4) {
+			LOGEP(ep, LOGL_NOTICE, "Short GTP Message according to flags 0x%02x: %lu < len=%u\n",
+				gtph->flags, sizeof(*gtph) + gtp_len, nread);
+			return;
+		}
+		gtp_len -= 4;
+		payload += 4;
+		const uint8_t *it = &exthdr->array[0].type;
+		while (*it != 0) {
+			unsigned int ext_len;
+			if (gtp_len < 1) {
+				LOGEP(ep, LOGL_NOTICE, "Short GTP Message according to flags 0x%02x: %lu < len=%u\n",
+				gtph->flags, sizeof(*gtph) + gtp_len, nread);
+				return;
+			}
+			ext_len = 1 + 1 + it[1] + 1;
+			if (gtp_len < ext_len) {
+				LOGEP(ep, LOGL_NOTICE, "Short GTP Message according to flags 0x%02x: %lu < len=%u\n",
+					gtph->flags, sizeof(*gtph) + gtp_len, nread);
+				return;
+			}
+			gtp_len -= ext_len;
+			payload += ext_len;
+			it = payload - 1;
+		}
+	}
+
+	/* 2) look-up tunnel based on TEID */
+	pthread_rwlock_rdlock(&d->rwlock);
+	t = _gtp_tunnel_find_r(d, teid, ep);
+	if (!t) {
+		pthread_rwlock_unlock(&d->rwlock);
+		LOGEP(ep, LOGL_NOTICE, "Unable to find tunnel for TEID=0x%08x\n", teid);
+		return;
+	}
+	outfd = t->tun_dev->fd;
+	pthread_rwlock_unlock(&d->rwlock);
+
+	/* 3) write to TUN device */
+	rc = write(outfd, payload, gtp_len);
+	if (rc < gtp_len) {
+		LOGEP(ep, LOGL_FATAL, "Error writing to tun device %s\n", strerror(errno));
+		exit(1);
+	}
+}
+
 /* one thread for reading from each GTP/UDP socket (GTP decapsulation -> tun) */
 static void *gtp_endpoint_thread(void *arg)
 {
 	struct gtp_endpoint *ep = (struct gtp_endpoint *)arg;
-	struct gtp_daemon *d = ep->d;
 
-	uint8_t buffer[MAX_UDP_PACKET+sizeof(struct gtp1_header)];
+	uint8_t buffer[sizeof(struct gtp1_header) + sizeof(struct gtp1_exthdr) + MAX_UDP_PACKET];
 
 	while (1) {
-		struct gtp_tunnel *t;
-		const struct gtp1_header *gtph;
-		int rc, nread, outfd;
-		uint32_t teid;
+		int rc;
 
 		/* 1) read GTP packet from UDP socket */
 		rc = recvfrom(ep->fd, buffer, sizeof(buffer), 0, (struct sockaddr *)NULL, 0);
@@ -47,46 +126,7 @@ static void *gtp_endpoint_thread(void *arg)
 			LOGEP(ep, LOGL_FATAL, "Error reading from UDP socket: %s\n", strerror(errno));
 			exit(1);
 		}
-		nread = rc;
-		if (nread < sizeof(*gtph)) {
-			LOGEP(ep, LOGL_NOTICE, "Short read: %d < %lu\n", nread, sizeof(*gtph));
-			continue;
-		}
-		gtph = (struct gtp1_header *)buffer;
-
-		/* check GTP heaader contents */
-		if (gtph->flags != 0x30) {
-			LOGEP(ep, LOGL_NOTICE, "Unexpected GTP Flags: 0x%02x\n", gtph->flags);
-			continue;
-		}
-		if (gtph->type != GTP_TPDU) {
-			LOGEP(ep, LOGL_NOTICE, "Unexpected GTP Message Type: 0x%02x\n", gtph->type);
-			continue;
-		}
-		if (sizeof(*gtph)+ntohs(gtph->length) > nread) {
-			LOGEP(ep, LOGL_NOTICE, "Shotr GTP Message: %lu < len=%d\n",
-				sizeof(*gtph)+ntohs(gtph->length), nread);
-			continue;
-		}
-		teid = ntohl(gtph->tid);
-
-		/* 2) look-up tunnel based on TEID */
-		pthread_rwlock_rdlock(&d->rwlock);
-		t = _gtp_tunnel_find_r(d, teid, ep);
-		if (!t) {
-			pthread_rwlock_unlock(&d->rwlock);
-			LOGEP(ep, LOGL_NOTICE, "Unable to find tunnel for TEID=0x%08x\n", teid);
-			continue;
-		}
-		outfd = t->tun_dev->fd;
-		pthread_rwlock_unlock(&d->rwlock);
-
-		/* 3) write to TUN device */
-		rc = write(outfd, buffer+sizeof(*gtph), ntohs(gtph->length));
-		if (rc < nread-sizeof(struct gtp1_header)) {
-			LOGEP(ep, LOGL_FATAL, "Error writing to tun device %s\n", strerror(errno));
-			exit(1);
-		}
+		handle_gtp1u(ep, buffer, rc);
 	}
 }
 

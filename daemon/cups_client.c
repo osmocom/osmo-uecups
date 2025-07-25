@@ -15,6 +15,7 @@
 #include <osmocom/core/exec.h>
 
 #include "internal.h"
+#include "gtp.h"
 
 #include <netinet/sctp.h>
 
@@ -202,6 +203,58 @@ static int parse_eua(struct sockaddr_storage *out, json_t *jip, json_t *jaddr_ty
 	return 0;
 }
 
+static int parse_ext_hdr_pdu_session_container(struct gtp1u_exthdr_pdu_sess_container *out, json_t *jpdu_sess_cont)
+{
+	json_t *jpdu_type, *jqfi;
+	const char *str_pdu_type;
+
+	if (!json_is_object(jpdu_sess_cont))
+		return -EINVAL;
+
+	memset(out, 0, sizeof(*out));
+
+	out->enabled = true;
+
+	jpdu_type = json_object_get(jpdu_sess_cont, "pdu_type");
+	if (!json_is_string(jpdu_type))
+		return -EINVAL;
+	str_pdu_type = json_string_value(jpdu_type);
+	if (!strcmp(str_pdu_type, "ul_pdu_sess_info"))
+		out->pdu_type = GTP1_EXTHDR_PDU_TYPE_UL_PDU_SESSION_INFORMATION;
+	else if (!strcmp(str_pdu_type, "dl_pdu_sess_info"))
+		out->pdu_type = GTP1_EXTHDR_PDU_TYPE_DL_PDU_SESSION_INFORMATION;
+	else
+		return -EINVAL;
+
+	jqfi = json_object_get(jpdu_sess_cont, "qfi");
+	if (!json_is_integer(jqfi))
+		return -EINVAL;
+	out->qos_flow_identifier = json_number_value(jqfi);
+
+	return 0;
+}
+static int parse_ext_hdr(struct gtp1u_exthdrs *out, json_t *jexthdr)
+{
+	json_t *jseq_num, *jn_pdu_num, *jpdu_sess_cont;
+	int rc = 0;
+
+	if (!json_is_object(jexthdr))
+		return -EINVAL;
+
+	jseq_num = json_object_get(jexthdr, "sequence_number");
+	if (jseq_num)
+		out->seq_num_enabled = true;
+
+	jn_pdu_num = json_object_get(jexthdr, "n_pdu_number");
+	if (jn_pdu_num)
+		out->n_pdu_num_enabled = true;
+
+	jpdu_sess_cont = json_object_get(jexthdr, "pdu_session_container");
+	if (jpdu_sess_cont)
+		rc = parse_ext_hdr_pdu_session_container(&out->pdu_sess_container, jpdu_sess_cont);
+
+	return rc;
+}
 
 static int parse_create_tun(struct gtp_tunnel_params *out, json_t *ctun)
 {
@@ -209,6 +262,7 @@ static int parse_create_tun(struct gtp_tunnel_params *out, json_t *ctun)
 	json_t *jrx_teid, *jtx_teid;
 	json_t *jtun_dev_name, *jtun_netns_name;
 	json_t *juser_addr, *juser_addr_type;
+	json_t *jgtp_ext_hdr;
 	int rc;
 
 	/* '{"create_tun":{"tx_teid":1234,"rx_teid":5678,"user_addr_type":"IPV4","user_addr":"21222324","local_gtp_ep":{"addr_type":"IPV4","ip":"31323334","Port":2152},"remote_gtp_ep":{"addr_type":"IPV4","ip":"41424344","Port":2152},"tun_dev_name":"tun23","tun_netns_name":"foo"}}' */
@@ -255,6 +309,13 @@ static int parse_create_tun(struct gtp_tunnel_params *out, json_t *ctun)
 		if (!json_is_string(jtun_netns_name))
 			return -EINVAL;
 		out->tun_netns_name = talloc_strdup(out, json_string_value(jtun_netns_name));
+	}
+
+	jgtp_ext_hdr = json_object_get(ctun, "gtp_ext_hdr");
+	if (jgtp_ext_hdr) {
+		rc = parse_ext_hdr(&out->exthdr, jgtp_ext_hdr);
+		if (rc < 0)
+			return rc;
 	}
 
 	return 0;

@@ -128,22 +128,80 @@ static void tun_device_pthread_cleanup_routine(void *data)
 	OSMO_ASSERT(rc == 0);
 }
 
+/* Note: This function is called with d->rwlock locked, and it's responsible of unlocking it before returning. */
+static int tx_gtp1u_pkt(struct gtp_tunnel *t, uint8_t *base_buffer, const uint8_t *payload, unsigned int payload_len)
+{
+	struct gtp1_header *gtph;
+	unsigned int head_len = payload - base_buffer;
+	unsigned int hdr_len_needed;
+	unsigned int opt_hdr_len_needed = 0;
+	struct sockaddr_storage daddr;
+	int outfd = t->gtp_ep->fd;
+	int rc;
+	uint8_t flags;
+
+#define GTP1_F_NPDU	0x01
+#define GTP1_F_SEQ	0x02
+#define GTP1_F_EXTHDR	0x04
+#define GTP1_F_MASK	0x07
+
+	flags = 0x30; /* Version */
+
+	if (t->exthdr.seq_num_enabled)
+		flags |= GTP1_F_SEQ;
+
+	if (t->exthdr.n_pdu_num_enabled)
+		flags |= GTP1_F_NPDU;
+
+	if (t->exthdr.pdu_sess_container.enabled) {
+		flags |= GTP1_F_EXTHDR;
+		opt_hdr_len_needed += 4; /* Extra Header struct */
+	}
+
+	/* Make sure the Next Extension Header Type is counted: */
+	if (flags & GTP1_F_MASK)
+		opt_hdr_len_needed += 4;
+
+	hdr_len_needed = sizeof(struct gtp1_header) + opt_hdr_len_needed;
+	OSMO_ASSERT(hdr_len_needed < head_len);
+	gtph = (struct gtp1_header *)(payload - hdr_len_needed);
+	/* initialize the fixed part of the GTP header */
+	gtph->flags = flags;
+	gtph->type = GTP_TPDU;
+	gtph->length = htons(opt_hdr_len_needed + payload_len);
+	gtph->tid = htonl(t->tx_teid);
+
+	if (flags & GTP1_F_MASK) {
+		struct gtp1_exthdr *exthdr = (struct gtp1_exthdr *)(((uint8_t *)gtph) + sizeof(*gtph));
+		exthdr->sequence_number = htons(0); /* TODO: increment sequence_number in "t". */
+		exthdr->n_pdu_number = 0; /* TODO: increment n_pdu_number in "t". */
+		if (t->exthdr.pdu_sess_container.enabled) {
+			exthdr->array[0].type = GTP1_EXTHDR_PDU_SESSION_CONTAINER;
+			exthdr->array[0].len = 1;
+			exthdr->array[0].pdu_type = t->exthdr.pdu_sess_container.pdu_type;
+			exthdr->array[0].qos_flow_identifier = t->exthdr.pdu_sess_container.qos_flow_identifier;
+			exthdr->array[1].type = 0; /* No extension headers */
+		} else {
+			exthdr->array[0].type = 0; /* No extension headers */
+		}
+	}
+
+	memcpy(&daddr, &t->remote_udp, sizeof(daddr));
+	pthread_rwlock_unlock(&t->d->rwlock);
+
+	/* 4) write to GTP/UDP socket */
+	rc = sendto(outfd, gtph, hdr_len_needed + payload_len, 0,
+			(struct sockaddr *)&daddr, sizeof(daddr));
+	return rc;
+}
+
 /* one thread for reading from each TUN device (TUN -> GTP encapsulation) */
 static void *tun_device_thread(void *arg)
 {
 	struct tun_device *tun = (struct tun_device *)arg;
 	struct gtp_daemon *d = tun->d;
-
-	uint8_t base_buffer[MAX_UDP_PACKET+sizeof(struct gtp1_header)];
-	struct gtp1_header *gtph = (struct gtp1_header *)base_buffer;
-	uint8_t *buffer = base_buffer + sizeof(struct gtp1_header);
-
-	struct sockaddr_storage daddr;
+	uint8_t base_buffer[sizeof(struct gtp1_header) + sizeof(struct gtp1_exthdr) + MAX_UDP_PACKET];
 	int old_cancelst_unused;
-
-	/* initialize the fixed part of the GTP header */
-	gtph->flags = 0x30;
-	gtph->type = GTP_TPDU;
 
 	pthread_cleanup_push(tun_device_pthread_cleanup_routine, tun);
 	/* IMPORTANT!: All logging functions in this function block must be called with
@@ -154,7 +212,8 @@ static void *tun_device_thread(void *arg)
 	while (1) {
 		struct gtp_tunnel *t;
 		struct pkt_info pinfo;
-		int rc, nread, outfd;
+		int rc, nread;
+		uint8_t *buffer = base_buffer + sizeof(base_buffer) - MAX_UDP_PACKET;
 
 		/* 1) read from tun */
 		rc = read(tun->fd, buffer, MAX_UDP_PACKET);
@@ -164,7 +223,6 @@ static void *tun_device_thread(void *arg)
 			exit(1);
 		}
 		nread = rc;
-		gtph->length = htons(nread);
 
 		rc = parse_pkt(&pinfo, buffer, nread);
 		if (rc < 0) {
@@ -194,14 +252,7 @@ static void *tun_device_thread(void *arg)
 			pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &old_cancelst_unused);
 			continue;
 		}
-		outfd = t->gtp_ep->fd;
-		memcpy(&daddr, &t->remote_udp, sizeof(daddr));
-		gtph->tid = htonl(t->tx_teid);
-		pthread_rwlock_unlock(&d->rwlock);
-
-		/* 4) write to GTP/UDP socket */
-		rc = sendto(outfd, base_buffer, nread+sizeof(*gtph), 0,
-			    (struct sockaddr *)&daddr, sizeof(daddr));
+		rc = tx_gtp1u_pkt(t, base_buffer, buffer, nread);
 		if (rc < 0) {
 			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelst_unused);
 			LOGTUN(tun, LOGL_FATAL, "Error Writing to UDP socket: %s\n", strerror(errno));
