@@ -128,5 +128,44 @@ ts_UECUPS_SockAddr(OCT4_16n ip, uint16_t Port := GTP1U_PORT) := {
 	Port := Port
 }
 
+template (value) UECUPS_CreateTun
+ts_UECUPS_CreateTun(template (value) uint32_t tx_teid,
+		    template (value) uint32_t rx_teid,
+		    template (value) UECUPS_AddrType user_addr_type,
+		    template (value) OCT4_16n user_addr,
+		    template (value) UECUPS_SockAddr local_gtp_ep,
+		    template (value) UECUPS_SockAddr remote_gtp_ep,
+		    template (value) charstring tun_dev_name := "tun",
+		    template (omit) charstring tun_netns_name := omit)
+:= {
+	tx_teid := tx_teid,
+	rx_teid := rx_teid,
+	user_addr_type := user_addr_type,
+	user_addr := user_addr,
+	local_gtp_ep := local_gtp_ep,
+	remote_gtp_ep := remote_gtp_ep,
+	tun_dev_name := tun_dev_name,
+	tun_netns_name := tun_netns_name
+};
+
+template (value) UECUPS_DestroyTun
+ts_UECUPS_DestroyTun(template (value) UECUPS_SockAddr local_gtp_ep,
+		     template (value) uint32_t rx_teid)
+:= {
+	local_gtp_ep := local_gtp_ep,
+	rx_teid := rx_teid
+};
+
+template (value) UECUPS_StartProgram
+ts_UECUPS_StartProgram(template (value) charstring command,
+		       template (omit) charstring_list environment := omit,
+		       template (value) charstring run_as_user := "root",
+		       template (omit) charstring tun_netns_name := omit)
+:= {
+	command := command,
+	environment := environment,
+	run_as_user := run_as_user,
+	tun_netns_name := tun_netns_name
+};
 
 } with { encode "JSON" };
