@@ -203,7 +203,9 @@ static void *tun_device_thread(void *arg)
 {
 	struct tun_device *tun = (struct tun_device *)arg;
 	struct gtp_daemon *d = tun->d;
-	uint8_t base_buffer[sizeof(struct gtp1_header) + sizeof(struct gtp1_exthdr) + MAX_UDP_PACKET];
+	/* Make sure "buffer" below ends up aligned to 4byte so that it can access struct iphdr in a 4-byte aligned way. */
+	const size_t payload_off_4byte_aligned = ((sizeof(struct gtp1_header) + sizeof(struct gtp1_exthdr)) + 3) & (~0x3);
+	uint8_t base_buffer[payload_off_4byte_aligned + MAX_UDP_PACKET];
 	int old_cancelst_unused;
 
 	pthread_cleanup_push(tun_device_pthread_cleanup_routine, tun);
@@ -216,7 +218,7 @@ static void *tun_device_thread(void *arg)
 		struct gtp_tunnel *t;
 		struct pkt_info pinfo;
 		int rc, nread;
-		uint8_t *buffer = base_buffer + sizeof(base_buffer) - MAX_UDP_PACKET;
+		uint8_t *buffer = base_buffer + payload_off_4byte_aligned;
 
 		/* 1) read from tun */
 		rc = read(tun->fd, buffer, MAX_UDP_PACKET);
