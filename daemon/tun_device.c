@@ -178,8 +178,11 @@ static int tx_gtp1u_pkt(struct gtp_tunnel *t, uint8_t *base_buffer, const uint8_
 		if (t->exthdr.pdu_sess_container.enabled) {
 			exthdr->array[0].type = GTP1_EXTHDR_PDU_SESSION_CONTAINER;
 			exthdr->array[0].len = 1;
+			exthdr->array[0].spare1 = 0;
 			exthdr->array[0].pdu_type = t->exthdr.pdu_sess_container.pdu_type;
 			exthdr->array[0].qos_flow_identifier = t->exthdr.pdu_sess_container.qos_flow_identifier;
+			exthdr->array[0].reflective_qos_indicator = 0;
+			exthdr->array[0].paging_policy_presence = 0;
 			exthdr->array[1].type = 0; /* No extension headers */
 		} else {
 			exthdr->array[0].type = 0; /* No extension headers */
