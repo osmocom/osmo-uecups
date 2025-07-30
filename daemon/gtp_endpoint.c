@@ -27,6 +27,16 @@
 #define LOGEP(ep, lvl, fmt, args ...) \
 	LOGP(DEP, lvl, "%s: " fmt, (ep)->name, ## args)
 
+/* LOGEP "No Cancel": Use within the pthread which can be pthread_cancel()ed, in
+ * order to avoid exiting with the logging mutex held and causing a deadlock afterwards. */
+#define LOGEP_NC(ep, lvl, fmt, args ...) \
+	do { \
+		int _old_cancelst_unused; \
+		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &_old_cancelst_unused); \
+		LOGEP(ep, lvl, fmt, ## args); \
+		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &_old_cancelst_unused); \
+	} while (0)
+
 /***********************************************************************
  * GTP Endpoint (UDP socket)
  ***********************************************************************/
@@ -42,24 +52,24 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 	uint16_t gtp_len;
 
 	if (nread < sizeof(*gtph)) {
-		LOGEP(ep, LOGL_NOTICE, "Short read: %u < %lu\n", nread, sizeof(*gtph));
+		LOGEP_NC(ep, LOGL_NOTICE, "Short read: %u < %lu\n", nread, sizeof(*gtph));
 		return;
 	}
 	gtph = (struct gtp1_header *)buffer;
 
 	/* check GTP header contents */
 	if ((gtph->flags & 0xf0) != 0x30) {
-		LOGEP(ep, LOGL_NOTICE, "Unexpected GTP Flags: 0x%02x\n", gtph->flags);
+		LOGEP_NC(ep, LOGL_NOTICE, "Unexpected GTP Flags: 0x%02x\n", gtph->flags);
 		return;
 	}
 	if (gtph->type != GTP_TPDU) {
-		LOGEP(ep, LOGL_NOTICE, "Unexpected GTP Message Type: 0x%02x\n", gtph->type);
+		LOGEP_NC(ep, LOGL_NOTICE, "Unexpected GTP Message Type: 0x%02x\n", gtph->type);
 		return;
 	}
 
 	gtp_len = ntohs(gtph->length);
 	if (sizeof(*gtph)+gtp_len > nread) {
-		LOGEP(ep, LOGL_NOTICE, "Short GTP Message: %lu < len=%u\n",
+		LOGEP_NC(ep, LOGL_NOTICE, "Short GTP Message: %lu < len=%u\n",
 			sizeof(*gtph)+gtp_len, nread);
 		return;
 	}
@@ -69,7 +79,7 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 	if (gtph->flags & GTP1_F_MASK) {
 		const struct gtp1_exthdr *exthdr = (const struct gtp1_exthdr *)payload;
 		if (gtp_len < 4) {
-			LOGEP(ep, LOGL_NOTICE, "Short GTP Message according to flags 0x%02x: %lu < len=%u\n",
+			LOGEP_NC(ep, LOGL_NOTICE, "Short GTP Message according to flags 0x%02x: %lu < len=%u\n",
 				gtph->flags, sizeof(*gtph) + gtp_len, nread);
 			return;
 		}
@@ -79,13 +89,13 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 		while (*it != 0) {
 			unsigned int ext_len;
 			if (gtp_len < 1) {
-				LOGEP(ep, LOGL_NOTICE, "Short GTP Message according to flags 0x%02x: %lu < len=%u\n",
+				LOGEP_NC(ep, LOGL_NOTICE, "Short GTP Message according to flags 0x%02x: %lu < len=%u\n",
 				gtph->flags, sizeof(*gtph) + gtp_len, nread);
 				return;
 			}
 			ext_len = 1 + 1 + it[1] + 1;
 			if (gtp_len < ext_len) {
-				LOGEP(ep, LOGL_NOTICE, "Short GTP Message according to flags 0x%02x: %lu < len=%u\n",
+				LOGEP_NC(ep, LOGL_NOTICE, "Short GTP Message according to flags 0x%02x: %lu < len=%u\n",
 					gtph->flags, sizeof(*gtph) + gtp_len, nread);
 				return;
 			}
@@ -100,7 +110,7 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 	t = _gtp_tunnel_find_r(d, teid, ep);
 	if (!t) {
 		pthread_rwlock_unlock(&d->rwlock);
-		LOGEP(ep, LOGL_NOTICE, "Unable to find tunnel for TEID=0x%08x\n", teid);
+		LOGEP_NC(ep, LOGL_NOTICE, "Unable to find tunnel for TEID=0x%08x\n", teid);
 		return;
 	}
 	outfd = t->tun_dev->fd;
@@ -109,12 +119,16 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 	/* 3) write to TUN device */
 	rc = write(outfd, payload, gtp_len);
 	if (rc < gtp_len) {
-		LOGEP(ep, LOGL_FATAL, "Error writing to tun device %s\n", strerror(errno));
+		LOGEP_NC(ep, LOGL_FATAL, "Error writing to tun device %s\n", strerror(errno));
 		exit(1);
 	}
 }
 
-/* one thread for reading from each GTP/UDP socket (GTP decapsulation -> tun) */
+/* one thread for reading from each GTP/UDP socket (GTP decapsulation -> tun)
+ * IMPORTANT!: All logging functions in this function block must be called with
+ * PTHREAD_CANCEL_DISABLE set, otherwise the thread could be cancelled while
+ * holding the logging mutex, hence causing deadlock with main (or other)
+ * thread. */
 static void *gtp_endpoint_thread(void *arg)
 {
 	struct gtp_endpoint *ep = (struct gtp_endpoint *)arg;
@@ -130,7 +144,7 @@ static void *gtp_endpoint_thread(void *arg)
 		/* 1) read GTP packet from UDP socket */
 		rc = recvfrom(ep->fd, buffer, sizeof(buffer), 0, (struct sockaddr *)NULL, 0);
 		if (rc < 0) {
-			LOGEP(ep, LOGL_FATAL, "Error reading from UDP socket: %s\n", strerror(errno));
+			LOGEP_NC(ep, LOGL_FATAL, "Error reading from UDP socket: %s\n", strerror(errno));
 			exit(1);
 		}
 		handle_gtp1u(ep, buffer, rc);
