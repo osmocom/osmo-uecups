@@ -1,4 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+
+/*pthread.h pthread_setname_np(): */
+#define _GNU_SOURCE
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -114,8 +118,11 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 static void *gtp_endpoint_thread(void *arg)
 {
 	struct gtp_endpoint *ep = (struct gtp_endpoint *)arg;
-
+	char thread_name[16];
 	uint8_t buffer[sizeof(struct gtp1_header) + sizeof(struct gtp1_exthdr) + MAX_UDP_PACKET];
+
+	snprintf(thread_name, sizeof(thread_name), "RxGtpu%s", ep->name);
+	pthread_setname_np(pthread_self(), thread_name);
 
 	while (1) {
 		int rc;

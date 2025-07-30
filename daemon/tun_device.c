@@ -1,4 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+
+/*pthread.h pthread_setname_np(): */
+#define _GNU_SOURCE
+
 #include <unistd.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -203,6 +207,7 @@ static void *tun_device_thread(void *arg)
 {
 	struct tun_device *tun = (struct tun_device *)arg;
 	struct gtp_daemon *d = tun->d;
+	char thread_name[16];
 	/* Make sure "buffer" below ends up aligned to 4byte so that it can access struct iphdr in a 4-byte aligned way. */
 	const size_t payload_off_4byte_aligned = ((sizeof(struct gtp1_header) + sizeof(struct gtp1_exthdr)) + 3) & (~0x3);
 	uint8_t base_buffer[payload_off_4byte_aligned + MAX_UDP_PACKET];
@@ -213,6 +218,9 @@ static void *tun_device_thread(void *arg)
 	 * PTHREAD_CANCEL_DISABLE set, otherwise the thread could be cancelled while
 	 * holding the logging mutex, hence causing deadlock with main (or other)
 	 * thread. */
+
+	snprintf(thread_name, sizeof(thread_name), "Rx%s", tun->devname);
+	pthread_setname_np(pthread_self(), thread_name);
 
 	while (1) {
 		struct gtp_tunnel *t;
