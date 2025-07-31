@@ -46,6 +46,16 @@
 #define LOGTUN(tun, lvl, fmt, args ...) \
 	LOGP(DTUN, lvl, "%s: " fmt, (tun)->devname, ## args)
 
+/* LOGTUN "No Cancel": Use within the pthread which can be pthread_cancel()ed, in
+ * order to avoid exiting with the logging mutex held and causing a deadlock afterwards. */
+#define LOGTUN_NC(ep, lvl, fmt, args ...) \
+	do { \
+		int _old_cancelst_unused; \
+		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &_old_cancelst_unused); \
+		LOGTUN(tun, lvl, fmt, ## args); \
+		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &_old_cancelst_unused); \
+	} while (0)
+
 /* extracted information from a packet */
 struct pkt_info {
 	struct sockaddr_storage saddr;
@@ -211,7 +221,6 @@ static void *tun_device_thread(void *arg)
 	/* Make sure "buffer" below ends up aligned to 4byte so that it can access struct iphdr in a 4-byte aligned way. */
 	const size_t payload_off_4byte_aligned = ((sizeof(struct gtp1_header) + sizeof(struct gtp1_exthdr)) + 3) & (~0x3);
 	uint8_t base_buffer[payload_off_4byte_aligned + MAX_UDP_PACKET];
-	int old_cancelst_unused;
 
 	pthread_cleanup_push(tun_device_pthread_cleanup_routine, tun);
 	/* IMPORTANT!: All logging functions in this function block must be called with
@@ -231,18 +240,14 @@ static void *tun_device_thread(void *arg)
 		/* 1) read from tun */
 		rc = read(tun->fd, buffer, MAX_UDP_PACKET);
 		if (rc < 0) {
-			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelst_unused);
-			LOGTUN(tun, LOGL_FATAL, "Error readingfrom tun device: %s\n", strerror(errno));
+			LOGTUN_NC(tun, LOGL_FATAL, "Error readingfrom tun device: %s\n", strerror(errno));
 			exit(1);
 		}
 		nread = rc;
 
 		rc = parse_pkt(&pinfo, buffer, nread);
 		if (rc < 0) {
-			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelst_unused);
-			LOGTUN(tun, LOGL_NOTICE, "Error parsing IP packet: %s\n",
-				osmo_hexdump(buffer, nread));
-			pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &old_cancelst_unused);
+			LOGTUN_NC(tun, LOGL_NOTICE, "Error parsing IP packet: %s\n", osmo_hexdump(buffer, nread));
 			continue;
 		}
 
@@ -260,15 +265,12 @@ static void *tun_device_thread(void *arg)
 			getnameinfo((const struct sockaddr *)&pinfo.saddr,
 				    sizeof(pinfo.saddr), host, sizeof(host), port, sizeof(port),
 				    NI_NUMERICHOST | NI_NUMERICSERV);
-			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelst_unused);
-			LOGTUN(tun, LOGL_NOTICE, "No tunnel found for source address %s:%s\n", host, port);
-			pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &old_cancelst_unused);
+			LOGTUN_NC(tun, LOGL_NOTICE, "No tunnel found for source address %s:%s\n", host, port);
 			continue;
 		}
 		rc = tx_gtp1u_pkt(t, base_buffer, buffer, nread);
 		if (rc < 0) {
-			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelst_unused);
-			LOGTUN(tun, LOGL_FATAL, "Error Writing to UDP socket: %s\n", strerror(errno));
+			LOGTUN_NC(tun, LOGL_FATAL, "Error Writing to UDP socket: %s\n", strerror(errno));
 			exit(1);
 		}
 	}
