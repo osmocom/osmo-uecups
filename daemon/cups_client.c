@@ -611,24 +611,53 @@ out:
 	return rc;
 }
 
+static void cups_client_free(struct cups_client *cc);
+
 static int cups_client_closed_cb(struct osmo_stream_srv *conn)
 {
 	struct cups_client *cc = osmo_stream_srv_get_data(conn);
-	struct gtp_daemon *d = cc->d;
-	struct subprocess *p, *p2;
 
 	LOGCC(cc, LOGL_INFO, "UECUPS connection lost\n");
-
-	/* kill + forget about all subprocesses of this client */
-	/* We need no locking here as the subprocess list is only used from the main thread */
-	llist_for_each_entry_safe(p, p2, &d->subprocesses, list) {
-		if (p->cups_client == cc)
-			subprocess_destroy(p, SIGKILL);
-	}
-	llist_del(&cc->list);
+	cups_client_free(cc);
 	return 0;
 }
 
+static struct cups_client *cups_client_alloc(struct gtp_daemon *d, struct osmo_stream_srv_link *link, int fd)
+{
+	struct cups_client *cc;
+
+	cc = talloc_zero(d, struct cups_client);
+	if (!cc)
+		return NULL;
+
+	cc->d = d;
+	osmo_sock_get_name_buf(cc->sockname, sizeof(cc->sockname), fd);
+	cc->srv = osmo_stream_srv_create(cc, link, fd, cups_client_read_cb, cups_client_closed_cb, cc);
+	if (!cc->srv) {
+		talloc_free(cc);
+		return NULL;
+	}
+
+	llist_add_tail(&cc->list, &d->cups_clients);
+	return cc;
+}
+
+static void cups_client_free(struct cups_client *cc)
+{
+	struct subprocess *p, *p2;
+
+	if (!cc)
+		return;
+
+	/* kill + forget about all subprocesses of this client */
+	/* We need no locking here as the subprocess list is only used from the main thread */
+	llist_for_each_entry_safe(p, p2, &cc->d->subprocesses, list) {
+		if (p->cups_client == cc)
+			subprocess_destroy(p, SIGKILL);
+	}
+
+	llist_del(&cc->list);
+}
 
 /* the control/user plane separation server bind/accept fd */
 static int cups_accept_cb(struct osmo_stream_srv_link *link, int fd)
@@ -636,20 +665,11 @@ static int cups_accept_cb(struct osmo_stream_srv_link *link, int fd)
 	struct gtp_daemon *d = osmo_stream_srv_link_get_data(link);
 	struct cups_client *cc;
 
-	cc = talloc_zero(d, struct cups_client);
+	cc = cups_client_alloc(d, link, fd);
 	if (!cc)
 		return -1;
 
-	cc->d = d;
-	osmo_sock_get_name_buf(cc->sockname, sizeof(cc->sockname), fd);
-	cc->srv = osmo_stream_srv_create(cc, link, fd, cups_client_read_cb, cups_client_closed_cb, cc);
-	if (!cc->srv) {
-		talloc_free(cc);
-		return -1;
-	}
 	LOGCC(cc, LOGL_INFO, "Accepted new UECUPS connection\n");
-
-	llist_add_tail(&cc->list, &d->cups_clients);
 
 	return 0;
 }
