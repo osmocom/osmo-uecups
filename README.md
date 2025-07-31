@@ -23,7 +23,7 @@ Homepage
 --------
 
 The official homepage of the project is
-https://osmocom.org/projects/osmo-ggsn/wiki/osmo-uecups
+https://osmocom.org/projects/osmo-uecups/wiki
 
 GIT Repository
 --------------
