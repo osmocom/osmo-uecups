@@ -552,70 +552,62 @@ static int cups_client_handle_json(struct cups_client *cc, json_t *jroot)
 	return 0;
 }
 
+
+static void cups_client_free(struct cups_client *cc);
+
 /* control/user plane separation per-client read cb */
-static int cups_client_read_cb(struct osmo_stream_srv *conn)
+static int cups_client_read_cb(struct osmo_stream_srv *conn, int res, struct msgb *msg)
 {
-	struct osmo_fd *ofd = osmo_stream_srv_get_ofd(conn);
 	struct cups_client *cc = osmo_stream_srv_get_data(conn);
-	struct msgb *msg = msgb_alloc(CUPS_MSGB_SIZE, "Rx JSON");
-	struct sctp_sndrcvinfo sinfo;
 	json_error_t jerr;
 	json_t *jroot;
-	int flags = 0;
-	int rc = 0;
+	int flags;
 
-	/* Read message from socket */
-	/* we cannot use osmo_stream_srv_recv() here, as we might get some out-of-band info from
-	 * SCTP. FIXME: add something like osmo_stream_srv_recv_sctp() to libosmo-netif and use
-	 * it here as well as in libosmo-sigtran and osmo-msc */
-	rc = sctp_recvmsg(ofd->fd, msg->tail, msgb_tailroom(msg), NULL, NULL, &sinfo, &flags);
-	if (rc <= 0) {
-		osmo_stream_srv_destroy(conn);
-		rc = -1;
-		goto out;
-	} else
-		msgb_put(msg, rc);
+	flags = msgb_sctp_msg_flags(msg);
+	LOGCC(cc, LOGL_DEBUG, "read %d bytes (flags=0x%x)\n", res, flags);
 
-	if (flags & MSG_NOTIFICATION) {
+	if (flags & OSMO_STREAM_SCTP_MSG_FLAGS_NOTIFICATION) {
 		union sctp_notification *notif = (union sctp_notification *) msgb_data(msg);
 		switch (notif->sn_header.sn_type) {
 		case SCTP_SHUTDOWN_EVENT:
-			osmo_stream_srv_destroy(conn);
-			rc = -EBADF;
-			goto out;
+			goto free_client;
 		default:
-			break;
+			msgb_free(msg);
+			return 0;
 		}
-		goto out;
 	}
-
-	LOGCC(cc, LOGL_DEBUG, "Rx '%s'\n", msgb_data(msg));
+	if (res <= 0)
+		goto free_client;
 
 	/* Parse the JSON */
 	jroot = json_loadb((const char *) msgb_data(msg), msgb_length(msg), 0, &jerr);
 	if (!jroot) {
-		LOGCC(cc, LOGL_ERROR, "Error decoding JSON (%s)", jerr.text);
-		rc = -1;
-		goto out;
+		LOGCC(cc, LOGL_ERROR, "Error decoding JSON (%s)\n", jerr.text);
+		msgb_free(msg);
+		return -1;
 	}
 
 	/* Dispatch */
-	rc = cups_client_handle_json(cc, jroot);
+	cups_client_handle_json(cc, jroot);
 
 	json_decref(jroot);
 	msgb_free(msg);
 
 	return 0;
-out:
-	msgb_free(msg);
-	return rc;
-}
 
-static void cups_client_free(struct cups_client *cc);
+free_client:
+	LOGCC(cc, LOGL_NOTICE, "UECUPS connection lost\n");
+	msgb_free(msg);
+	cups_client_free(cc);
+	return -1;
+}
 
 static int cups_client_closed_cb(struct osmo_stream_srv *conn)
 {
 	struct cups_client *cc = osmo_stream_srv_get_data(conn);
+
+	if (!cc) /* already being destroyed in cups_client_free() */
+		return 0;
 
 	LOGCC(cc, LOGL_INFO, "UECUPS connection lost\n");
 	cups_client_free(cc);
@@ -632,11 +624,13 @@ static struct cups_client *cups_client_alloc(struct gtp_daemon *d, struct osmo_s
 
 	cc->d = d;
 	osmo_sock_get_name_buf(cc->sockname, sizeof(cc->sockname), fd);
-	cc->srv = osmo_stream_srv_create(cc, link, fd, cups_client_read_cb, cups_client_closed_cb, cc);
+	cc->srv = osmo_stream_srv_create2(cc, link, fd, cc);
 	if (!cc->srv) {
 		talloc_free(cc);
 		return NULL;
 	}
+	osmo_stream_srv_set_read_cb(cc->srv, cups_client_read_cb);
+	osmo_stream_srv_set_closed_cb(cc->srv, cups_client_closed_cb);
 
 	llist_add_tail(&cc->list, &d->cups_clients);
 	return cc;
@@ -649,6 +643,8 @@ static void cups_client_free(struct cups_client *cc)
 	if (!cc)
 		return;
 
+	LOGCC(cc, LOGL_DEBUG, "free()\n");
+
 	/* kill + forget about all subprocesses of this client */
 	/* We need no locking here as the subprocess list is only used from the main thread */
 	llist_for_each_entry_safe(p, p2, &cc->d->subprocesses, list) {
@@ -657,8 +653,10 @@ static void cups_client_free(struct cups_client *cc)
 	}
 
 	llist_del(&cc->list);
-	if (cc->srv)
+	if (cc->srv) {
+		osmo_stream_srv_set_data(cc->srv, NULL);
 		osmo_stream_srv_destroy(cc->srv);
+	}
 	talloc_free(cc);
 }
 
@@ -691,6 +689,7 @@ struct osmo_stream_srv_link *cups_srv_link_create(struct gtp_daemon *d)
 	osmo_stream_srv_link_set_proto(srv_link, IPPROTO_SCTP);
 	osmo_stream_srv_link_set_data(srv_link, g_daemon);
 	osmo_stream_srv_link_set_accept_cb(srv_link, cups_accept_cb);
+	osmo_stream_srv_link_set_msgb_alloc_info(srv_link, CUPS_MSGB_SIZE, 0);
 	osmo_stream_srv_link_open(srv_link);
 	return srv_link;
 }
