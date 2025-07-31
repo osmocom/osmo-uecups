@@ -617,14 +617,14 @@ static int cups_client_closed_cb(struct osmo_stream_srv *conn)
 	struct gtp_daemon *d = cc->d;
 	struct subprocess *p, *p2;
 
+	LOGCC(cc, LOGL_INFO, "UECUPS connection lost\n");
+
 	/* kill + forget about all subprocesses of this client */
 	/* We need no locking here as the subprocess list is only used from the main thread */
 	llist_for_each_entry_safe(p, p2, &d->subprocesses, list) {
 		if (p->cups_client == cc)
 			subprocess_destroy(p, SIGKILL);
 	}
-
-	LOGCC(cc, LOGL_INFO, "UECUPS connection lost\n");
 	llist_del(&cc->list);
 	return 0;
 }
