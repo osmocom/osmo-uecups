@@ -657,6 +657,9 @@ static void cups_client_free(struct cups_client *cc)
 	}
 
 	llist_del(&cc->list);
+	if (cc->srv)
+		osmo_stream_srv_destroy(cc->srv);
+	talloc_free(cc);
 }
 
 /* the control/user plane separation server bind/accept fd */
