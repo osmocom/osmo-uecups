@@ -124,11 +124,16 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 	}
 }
 
-/* one thread for reading from each GTP/UDP socket (GTP decapsulation -> tun)
- * IMPORTANT!: All logging functions in this function block must be called with
- * PTHREAD_CANCEL_DISABLE set, otherwise the thread could be cancelled while
- * holding the logging mutex, hence causing deadlock with main (or other)
- * thread. */
+/* One thread for reading from each GTP/UDP socket (GTP decapsulation -> tun)
+ * IMPORTANT!: Since this thread is cancellable (deferred type):
+ * - All osmo logging functions in this thread must be called with PTHREAD_CANCEL_DISABLE set,
+ *   otherwise the thread could be cancelled while holding the libosmocore logging mutex, hence causing
+ *   deadlock with main (or other) thread.
+ * - Within pthread_rwlock_*(&d->rwlock) mutual exclusion zone, if we ever do any call considered
+ *   a cancellation point (see "man pthreads"), then make sure to do the call protected with
+ *   PTHREAD_CANCEL_DISABLE set, otherwise we may leave the d->rwlock held forever and cause a deadlock
+ *   with main (or other) thread.
+ */
 static void *gtp_endpoint_thread(void *arg)
 {
 	struct gtp_endpoint *ep = (struct gtp_endpoint *)arg;

@@ -212,7 +212,16 @@ static int tx_gtp1u_pkt(struct gtp_tunnel *t, uint8_t *base_buffer, const uint8_
 	return rc;
 }
 
-/* one thread for reading from each TUN device (TUN -> GTP encapsulation) */
+/* One thread for reading from each TUN device (TUN -> GTP encapsulation)
+ * IMPORTANT!: Since this thread is cancellable (deferred type):
+ * - All osmo logging functions in this thread must be called with PTHREAD_CANCEL_DISABLE set,
+ *   otherwise the thread could be cancelled while holding the libosmocore logging mutex, hence causing
+ *   deadlock with main (or other) thread.
+ * - Within pthread_rwlock_*(&d->rwlock) mutual exclusion zone, if we ever do any call considered
+ *   a cancellation point (see "man pthreads"), then make sure to do the call protected with
+ *   PTHREAD_CANCEL_DISABLE set, otherwise we may leave the d->rwlock held forever and cause a deadlock
+ *   with main (or other) thread.
+ */
 static void *tun_device_thread(void *arg)
 {
 	struct tun_device *tun = (struct tun_device *)arg;
@@ -223,10 +232,6 @@ static void *tun_device_thread(void *arg)
 	uint8_t base_buffer[payload_off_4byte_aligned + MAX_UDP_PACKET];
 
 	pthread_cleanup_push(tun_device_pthread_cleanup_routine, tun);
-	/* IMPORTANT!: All logging functions in this function block must be called with
-	 * PTHREAD_CANCEL_DISABLE set, otherwise the thread could be cancelled while
-	 * holding the logging mutex, hence causing deadlock with main (or other)
-	 * thread. */
 
 	snprintf(thread_name, sizeof(thread_name), "Rx%s", tun->devname);
 	pthread_setname_np(pthread_self(), thread_name);
@@ -269,6 +274,7 @@ static void *tun_device_thread(void *arg)
 			continue;
 		}
 		rc = tx_gtp1u_pkt(t, base_buffer, buffer, nread);
+		/* pthread_rwlock_unlock() was called inside tx_gtp1u_pkt(). */
 		if (rc < 0) {
 			LOGTUN_NC(tun, LOGL_FATAL, "Error Writing to UDP socket: %s\n", strerror(errno));
 			exit(1);
