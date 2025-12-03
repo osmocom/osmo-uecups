@@ -1,3 +1,32 @@
+osmo-uecups (0.3.0) unstable; urgency=medium
+
+  [ Pau Espin Pedrol ]
+  * .gitignore: Add contrib/osmo-uecups.spec
+  * jenkins.sh: Skip building unneeded libosmo-abis
+  * ttcn3: UECUPS_Types: Add templates for existing json commands
+  * Introduce GTPv1U QFI support
+  * tun_device: Fix Tx uninitialized gtpu ext hdr fields
+  * tun_device: Make sure struct iphdr access is 4-byte aligned
+  * Set thread names
+  * cups_client: Log conn lost before tear down subprocesses
+  * cups_client: Add cups_client_alloc/free functions
+  * cups_client: Fix memleak during conn closed
+  * cups_client: Use new iofd stream_srv APIs
+  * gtp_endpoint: Avoid deadlocks logging while thread is cancelled
+  * tun_device: Introduce helper macro LOGTUN_NC()
+  * cosmetic: Improve comments on cancellable thread safety
+
+  [ Oliver Smith ]
+  * contrib: remove rpm spec file
+  * contrib/jenkins: libosmo-abis after libosmo-netif
+
+  [ Vadim Yanitskiy ]
+  * README.md: cosmetic: fix a typo
+  * README.md: fix wrong project's homepage URL
+  * doc/examples: populate the config file example
+
+ -- Pau Espin Pedrol <pespin@sysmocom.de>  Wed, 03 Dec 2025 20:06:03 +0100
+
 osmo-uecups (0.2.2) unstable; urgency=medium
 
   [ Harald Welte ]

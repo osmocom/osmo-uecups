@@ -11,10 +11,10 @@ Build-Depends: debhelper (>= 10),
                pkg-config,
                libjansson-dev,
                libnl-route-3-dev,
-               libosmocore-dev (>= 1.9.0),
-               libosmo-netif-dev (>= 1.4.0),
+               libosmocore-dev (>= 1.12.0),
+               libosmo-netif-dev (>= 1.7.0),
                libsctp-dev,
-               osmo-gsm-manuals-dev (>= 1.5.0)
+               osmo-gsm-manuals-dev (>= 1.7.0)
 Standards-Version: 3.9.8
 Vcs-Git: https://gitea.osmocom.org/cellular-infrastructure/osmo-uecups
 Vcs-Browser: https://gitea.osmocom.org/cellular-infrastructure/osmo-uecups
