@@ -25,6 +25,7 @@
 struct gtp_tunnel *gtp_tunnel_alloc(struct gtp_daemon *d, const struct gtp_tunnel_params *cpars)
 {
 	struct gtp_tunnel *t;
+	int rc;
 
 	t = talloc_zero(d, struct gtp_tunnel);
 	if (!t)
@@ -60,9 +61,9 @@ struct gtp_tunnel *gtp_tunnel_alloc(struct gtp_daemon *d, const struct gtp_tunne
 	memcpy(&t->user_addr, &cpars->user_addr, sizeof(t->user_addr));
 	memcpy(&t->remote_udp, &cpars->remote_udp, sizeof(t->remote_udp));
 
-	if (netdev_add_addr(t->tun_dev->nl, t->tun_dev->ifindex, &t->user_addr) < 0) {
+	if ((rc = osmo_netdev_add_addr(t->tun_dev->netdev, &t->user_addr, 32)) < 0) {
 		LOGT(t, LOGL_ERROR, "Cannot add user addr to tun device: %s\n",
-			strerror(errno));
+		     strerror(-rc));
 	}
 
 	/* TODO: hash table? */
@@ -134,12 +135,14 @@ _gtp_tunnel_find_eua(struct tun_device *tun, const struct osmo_sockaddr *osa, ui
 /* UNLOCKED destroy of tunnel; drops references to EP + TUN */
 void _gtp_tunnel_destroy(struct gtp_tunnel *t)
 {
+	int rc;
+
 	LOGT(t, LOGL_NOTICE, "Destroying\n");
 	/* talloc is not thread safe, all alloc/free must come from main thread */
 	ASSERT_MAIN_THREAD(t->d);
 
-	if (netdev_del_addr(t->tun_dev->nl, t->tun_dev->ifindex, &t->user_addr) < 0)
-		LOGT(t, LOGL_ERROR, "Cannot remove user address: %s\n", strerror(errno));
+	if ((rc = osmo_netdev_del_addr(t->tun_dev->netdev, &t->user_addr, 32)) < 0)
+		LOGT(t, LOGL_ERROR, "Cannot remove user address: %s\n", strerror(-rc));
 
 	llist_del(&t->list);
 

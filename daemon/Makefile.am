@@ -37,7 +37,6 @@ bin_PROGRAMS = \
 osmo_uecups_daemon_SOURCES = \
 	cups_client.c \
 	utility.c \
-	netdev.c \
 	tun_device.c \
 	gtp_daemon.c \
 	gtp_endpoint.c \

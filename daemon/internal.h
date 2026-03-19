@@ -13,6 +13,7 @@
 #include <osmocom/core/it_q.h>
 #include <osmocom/core/utils.h>
 #include <osmocom/core/socket.h>
+#include <osmocom/core/netdev.h>
 
 #include <osmocom/netif/stream.h>
 
@@ -35,15 +36,6 @@ enum {
 	DGT,
 	DUECUPS,
 };
-
-/***********************************************************************
- * netdev / netlink
- ***********************************************************************/
-
-int netdev_add_addr(struct nl_sock *nlsk, int ifindex, const struct osmo_sockaddr *osa);
-int netdev_del_addr(struct nl_sock *nlsk, int ifindex, const struct osmo_sockaddr *osa);
-int netdev_set_link(struct nl_sock *nlsk, int ifindex, bool up);
-int netdev_add_defaultroute(struct nl_sock *nlsk, int ifindex, uint8_t family);
 
 
 /***********************************************************************
@@ -115,8 +107,7 @@ struct tun_device {
 	const char *netns_name;
 	int netns_fd;
 
-	/* netlink socket in the namespace of the tun device */
-	struct nl_sock *nl;
+	struct osmo_netdev *netdev;
 
 	/* list of local addresses? or simply only have the kernel know thses? */
 

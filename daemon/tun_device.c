@@ -16,7 +16,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <netdb.h>
-
+#include <net/if.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 
@@ -25,10 +25,6 @@
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <sys/ioctl.h>
-
-#include <linux/netlink.h>
-#include <netlink/socket.h>
-#include <netlink/route/link.h>
 
 #include <osmocom/core/linuxlist.h>
 #include <osmocom/core/talloc.h>
@@ -318,9 +314,9 @@ static int tun_open(int flags, const char *name)
 static struct tun_device *
 _tun_device_create(struct gtp_daemon *d, const char *devname, const char *netns_name)
 {
-	struct rtnl_link *link;
 	struct tun_device *tun;
 	struct osmo_netns_switch_state switch_state;
+	bool inside_netns = false;
 	int rc;
 
 	tun = talloc_zero(d, struct tun_device);
@@ -349,6 +345,7 @@ _tun_device_create(struct gtp_daemon *d, const char *devname, const char *netns_
 				tun->netns_name, strerror(errno));
 			goto err_close_ns;
 		}
+		inside_netns = true;
 	}
 
 	tun->fd = tun_open(0, tun->devname);
@@ -357,49 +354,72 @@ _tun_device_create(struct gtp_daemon *d, const char *devname, const char *netns_
 		goto err_restore_ns;
 	}
 
-	tun->nl = nl_socket_alloc();
-	if (!tun->nl || nl_connect(tun->nl, NETLINK_ROUTE) < 0) {
-		LOGTUN(tun, LOGL_ERROR, "Cannot create netlink socket in namespace '%s'\n",
-			tun->netns_name);
+	/* Store interface index:
+	 * (Note: there's a potential race condition here between creating the
+	 * iface with a given name above and attempting to retrieve its ifindex based
+	 * on that name. Someone (ie udev) could have the iface renamed in
+	 * between here. It's a pity that TUNSETIFF doesn't copy back to us the
+	 * newly allocated ifindex as it does with ifname)
+	 */
+	tun->ifindex = if_nametoindex(tun->devname);
+	if (tun->ifindex == 0) {
+		LOGTUN(tun, LOGL_ERROR, "Unable to find ifindex for dev %s\n",
+		       tun->devname);
 		goto err_close;
 	}
 
-	rc = rtnl_link_get_kernel(tun->nl, 0, tun->devname, &link);
-	if (rc < 0) {
-		LOGTUN(tun, LOGL_ERROR, "Cannot get ifindex for netif after create?!?\n");
-		goto err_free_nl;
-	}
-	tun->ifindex = rtnl_link_get_ifindex(link);
-	rtnl_link_put(link);
-
 	/* switch back to default namespace before creating new thread */
-	if (tun->netns_name)
+	if (inside_netns) {
 		OSMO_ASSERT(osmo_netns_switch_exit(&switch_state) == 0);
+		inside_netns = false;
+	}
+
+	tun->netdev = osmo_netdev_alloc(tun, tun->devname);
+	if (tun->netns_name) {
+		rc = osmo_netdev_set_netns_name(tun->netdev, tun->netns_name);
+		if (rc < 0)
+			goto err_free_netdev;
+	}
+	rc = osmo_netdev_set_ifindex(tun->netdev, tun->ifindex);
+	if (rc < 0)
+		goto err_free_netdev;
+
+	rc = osmo_netdev_register(tun->netdev);
+	if (rc < 0)
+		goto err_free_netdev;
 
 	/* bring the network device up */
-	rc = netdev_set_link(tun->nl, tun->ifindex, true);
+	rc = osmo_netdev_ifupdown(tun->netdev, true);
 	if (rc < 0)
 		LOGTUN(tun, LOGL_ERROR, "Cannot set interface to 'up'\n");
 
 	if (tun->netns_name) {
-		rc = netdev_add_defaultroute(tun->nl, tun->ifindex, AF_INET);
+		struct osmo_sockaddr osa;
+
+		memset(&osa, 0, sizeof(osa));
+		osa.u.sin.sin_family = AF_INET;
+		osa.u.sin.sin_addr.s_addr = 0;
+		rc = osmo_netdev_add_route(tun->netdev, &osa, 0, NULL);
 		if (rc < 0)
 			LOGTUN(tun, LOGL_ERROR, "Cannot add IPv4 default route "
-						"(rc=%d): %s\n", rc, nl_geterror(rc));
+						"(rc=%d): %s\n", rc, strerror(-rc));
 		else
 			LOGTUN(tun, LOGL_INFO, "Added IPv4 default route\n");
 
-		rc = netdev_add_defaultroute(tun->nl, tun->ifindex, AF_INET6);
+		memset(&osa, 0, sizeof(osa));
+		osa.u.sin6.sin6_family = AF_INET6;
+		memset(&osa.u.sin6.sin6_addr, 0, sizeof(osa.u.sin6.sin6_addr));
+		rc = osmo_netdev_add_route(tun->netdev, &osa, 0, NULL);
 		if (rc < 0)
 			LOGTUN(tun, LOGL_ERROR, "Cannot add IPv6 default route "
-						"(rc=%d): %s\n", rc, nl_geterror(rc));
+						"(rc=%d): %s\n", rc, strerror(-rc));
 		else
 			LOGTUN(tun, LOGL_INFO, "Added IPv6 default route\n");
 	}
 
 	if (pthread_create(&tun->thread, NULL, tun_device_thread, tun)) {
 		LOGTUN(tun, LOGL_ERROR, "Cannot create TUN thread: %s\n", strerror(errno));
-		goto err_free_nl;
+		goto err_free_netdev;
 	}
 
 	LOGTUN(tun, LOGL_INFO, "Created (in netns '%s')\n", tun->netns_name);
@@ -407,12 +427,12 @@ _tun_device_create(struct gtp_daemon *d, const char *devname, const char *netns_
 
 	return tun;
 
-err_free_nl:
-	nl_socket_free(tun->nl);
+err_free_netdev:
+	osmo_netdev_free(tun->netdev);
 err_close:
 	close(tun->fd);
 err_restore_ns:
-	if (tun->netns_name)
+	if (inside_netns)
 		OSMO_ASSERT(osmo_netns_switch_exit(&switch_state) == 0);
 err_close_ns:
 	if (tun->netns_name)
@@ -482,7 +502,7 @@ void _tun_device_destroy(struct tun_device *tun)
 	if (tun->netns_name)
 		close(tun->netns_fd);
 	close(tun->fd);
-	nl_socket_free(tun->nl);
+	osmo_netdev_free(tun->netdev);
 	talloc_free(tun);
 }
 
