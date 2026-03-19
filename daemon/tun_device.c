@@ -58,8 +58,8 @@
 
 /* extracted information from a packet */
 struct pkt_info {
-	struct sockaddr_storage saddr;
-	struct sockaddr_storage daddr;
+	struct osmo_sockaddr saddr;
+	struct osmo_sockaddr daddr;
 	uint8_t proto;
 };
 
@@ -71,8 +71,8 @@ static int parse_pkt(struct pkt_info *out, const uint8_t *in, unsigned int in_le
 	memset(out, 0, sizeof(*out));
 
 	if (ip4->version == 4) {
-		struct sockaddr_in *saddr4 = (struct sockaddr_in *) &out->saddr;
-		struct sockaddr_in *daddr4 = (struct sockaddr_in *) &out->daddr;
+		struct sockaddr_in *saddr4 = &out->saddr.u.sin;
+		struct sockaddr_in *daddr4 = &out->daddr.u.sin;
 
 		if (in_len < sizeof(*ip4) || in_len < 4*ip4->ihl)
 			return -1;
@@ -100,8 +100,8 @@ static int parse_pkt(struct pkt_info *out, const uint8_t *in, unsigned int in_le
 		}
 	} else if (ip4->version == 6) {
 		const struct ip6_hdr *ip6 = (struct ip6_hdr *) in;
-		struct sockaddr_in6 *saddr6 = (struct sockaddr_in6 *) &out->saddr;
-		struct sockaddr_in6 *daddr6 = (struct sockaddr_in6 *) &out->daddr;
+		struct sockaddr_in6 *saddr6 = &out->saddr.u.sin6;
+		struct sockaddr_in6 *daddr6 = &out->daddr.u.sin6;
 
 		if (in_len < sizeof(*ip6))
 			return -1;
@@ -149,7 +149,7 @@ static int tx_gtp1u_pkt(struct gtp_tunnel *t, uint8_t *base_buffer, const uint8_
 	unsigned int head_len = payload - base_buffer;
 	unsigned int hdr_len_needed;
 	unsigned int opt_hdr_len_needed = 0;
-	struct sockaddr_storage daddr;
+	struct osmo_sockaddr daddr;
 	int outfd = t->gtp_ep->fd;
 	int rc;
 	uint8_t flags;
@@ -208,7 +208,7 @@ static int tx_gtp1u_pkt(struct gtp_tunnel *t, uint8_t *base_buffer, const uint8_
 
 	/* 4) write to GTP/UDP socket */
 	rc = sendto(outfd, gtph, hdr_len_needed + payload_len, 0,
-			(struct sockaddr *)&daddr, sizeof(daddr));
+		    &daddr.u.sa, sizeof(daddr.u.sas));
 	return rc;
 }
 
@@ -256,19 +256,19 @@ static void *tun_device_thread(void *arg)
 			continue;
 		}
 
-		if (pinfo.saddr.ss_family == AF_INET6 && pinfo.proto == IPPROTO_ICMPV6) {
+		if (pinfo.saddr.u.sa.sa_family == AF_INET6 && pinfo.proto == IPPROTO_ICMPV6) {
 			/* 2) TODO: magic voodoo for IPv6 neighbor discovery */
 		}
 
 		/* 3) look-up tunnel based on source IP address (+ filter) */
 		pthread_rwlock_rdlock(&d->rwlock);
-		t = _gtp_tunnel_find_eua(tun, (struct sockaddr *) &pinfo.saddr, pinfo.proto);
+		t = _gtp_tunnel_find_eua(tun, &pinfo.saddr, pinfo.proto);
 		if (!t) {
 			char host[128];
 			char port[8];
 			pthread_rwlock_unlock(&d->rwlock);
-			getnameinfo((const struct sockaddr *)&pinfo.saddr,
-				    sizeof(pinfo.saddr), host, sizeof(host), port, sizeof(port),
+			getnameinfo(&pinfo.saddr.u.sa,
+				    sizeof(pinfo.saddr.u.sas), host, sizeof(host), port, sizeof(port),
 				    NI_NUMERICHOST | NI_NUMERICSERV);
 			LOGTUN_NC(tun, LOGL_NOTICE, "No tunnel found for source address %s:%s\n", host, port);
 			continue;

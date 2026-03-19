@@ -157,7 +157,7 @@ static void *gtp_endpoint_thread(void *arg)
 }
 
 static struct gtp_endpoint *
-_gtp_endpoint_create(struct gtp_daemon *d, const struct sockaddr_storage *bind_addr)
+_gtp_endpoint_create(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr)
 {
 	struct gtp_endpoint *ep = talloc_zero(d, struct gtp_endpoint);
 	char ipstr[INET6_ADDRSTRLEN];
@@ -167,7 +167,7 @@ _gtp_endpoint_create(struct gtp_daemon *d, const struct sockaddr_storage *bind_a
 	if (!ep)
 		return NULL;
 
-	rc = getnameinfo((struct sockaddr *)bind_addr, sizeof(*bind_addr),
+	rc = getnameinfo(&bind_addr->u.sa, sizeof(bind_addr->u.sas),
 			 ipstr, sizeof(ipstr), portstr, sizeof(portstr), NI_NUMERICHOST|NI_NUMERICSERV);
 	if (rc != 0)
 		goto out_free;
@@ -176,12 +176,12 @@ _gtp_endpoint_create(struct gtp_daemon *d, const struct sockaddr_storage *bind_a
 	ep->d = d;
 	ep->use_count = 1;
 	ep->bind_addr = *bind_addr;
-	ep->fd = socket(ep->bind_addr.ss_family, SOCK_DGRAM, IPPROTO_UDP);
+	ep->fd = socket(ep->bind_addr.u.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP);
 	if (ep->fd < 0) {
 		LOGEP(ep, LOGL_ERROR, "Cannot create UDP socket: %s\n", strerror(errno));
 		goto out_free;
 	}
-	rc = bind(ep->fd, (struct sockaddr *) &ep->bind_addr, sizeof(ep->bind_addr));
+	rc = bind(ep->fd, &ep->bind_addr.u.sa, sizeof(ep->bind_addr.u.sas));
 	if (rc < 0) {
 		LOGEP(ep, LOGL_ERROR, "Cannot bind UDP socket: %s\n", strerror(errno));
 		goto out_close;
@@ -205,21 +205,19 @@ out_free:
 }
 
 struct gtp_endpoint *
-_gtp_endpoint_find(struct gtp_daemon *d, const struct sockaddr_storage *bind_addr)
+_gtp_endpoint_find(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr)
 {
 	struct gtp_endpoint *ep;
 
 	llist_for_each_entry(ep, &d->gtp_endpoints, list) {
-		if (sockaddr_equals((const struct sockaddr *) &ep->bind_addr,
-				    (const struct sockaddr *) bind_addr)) {
+		if (osmo_sockaddr_cmp(&ep->bind_addr, bind_addr) == 0)
 			return ep;
-		}
 	}
 	return NULL;
 }
 
 struct gtp_endpoint *
-gtp_endpoint_find_or_create(struct gtp_daemon *d, const struct sockaddr_storage *bind_addr)
+gtp_endpoint_find_or_create(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr)
 {
 	struct gtp_endpoint *ep;
 
@@ -258,7 +256,7 @@ static void _gtp_endpoint_destroy(struct gtp_endpoint *ep)
 void _gtp_endpoint_deref_destroy(struct gtp_endpoint *ep)
 {
 	struct gtp_daemon *d = ep->d;
-	struct sockaddr_storage ss = ep->bind_addr;
+	struct osmo_sockaddr osa = ep->bind_addr;
 	struct gtp_tunnel *t, *t2;
 	struct gtp_endpoint *ep2;
 
@@ -274,7 +272,7 @@ void _gtp_endpoint_deref_destroy(struct gtp_endpoint *ep)
 	/* _gtp_endpoint_destroy may already have been called via
 	 * _gtp_tunnel_destroy -> gtp_endpoint_release, so we have to
 	 * check if the ep can still be found in the list */
-	ep2 = _gtp_endpoint_find(d, &ss);
+	ep2 = _gtp_endpoint_find(d, &osa);
 	if (ep2 && ep2 == ep)
 		_gtp_endpoint_destroy(ep2);
 }

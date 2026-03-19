@@ -87,12 +87,12 @@ out:
 /* find tunnel by R(x_teid), T(x_teid) + A(ddr) */
 static struct gtp_tunnel *
 _gtp_tunnel_find_rta(struct gtp_daemon *d, uint32_t rx_teid, uint32_t tx_teid,
-		     const struct sockaddr_storage *user_addr)
+		     const struct osmo_sockaddr *user_addr)
 {
 	struct gtp_tunnel *t;
 	llist_for_each_entry(t, &d->gtp_tunnels, list) {
 		if (t->rx_teid == rx_teid && t->tx_teid == tx_teid &&
-		    sockaddr_equals((struct sockaddr *) &t->user_addr, (struct sockaddr *)user_addr))
+		    osmo_sockaddr_cmp(&t->user_addr, &user_addr) == 0)
 			return t;
 	}
 	return NULL;
@@ -117,14 +117,15 @@ _gtp_tunnel_find_r(struct gtp_daemon *d, uint32_t rx_teid, struct gtp_endpoint *
 
 /* UNLOCKED find tunnel by tun + EUA ip (+proto/port) */
 struct gtp_tunnel *
-_gtp_tunnel_find_eua(struct tun_device *tun, const struct sockaddr *sa, uint8_t proto)
+_gtp_tunnel_find_eua(struct tun_device *tun, const struct osmo_sockaddr *osa, uint8_t proto)
 {
 	struct gtp_daemon *d = tun->d;
 	struct gtp_tunnel *t;
 
 	llist_for_each_entry(t, &d->gtp_tunnels, list) {
 		/* TODO: Find best matching filter */
-		if (t->tun_dev == tun && sockaddr_equals(sa, (struct sockaddr *) &t->user_addr))
+		if (t->tun_dev == tun &&
+		    osmo_sockaddr_cmp(osa, &t->user_addr) == 0)
 			return t;
 	}
 	return NULL;
@@ -149,7 +150,7 @@ void _gtp_tunnel_destroy(struct gtp_tunnel *t)
 	talloc_free(t);
 }
 
-bool gtp_tunnel_destroy(struct gtp_daemon *d, const struct sockaddr_storage *bind_addr, uint32_t rx_teid)
+bool gtp_tunnel_destroy(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr, uint32_t rx_teid)
 {
 	struct gtp_endpoint *ep;
 	bool rc = false;

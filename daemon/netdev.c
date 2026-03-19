@@ -24,27 +24,24 @@
 #include <netlink/route/nexthop.h>
 
 #include <osmocom/core/utils.h>
+#include <osmocom/core/socket.h>
 
 /***********************************************************************
  * netlink helper functions
  ***********************************************************************/
 
-static int _netdev_addr(struct nl_sock *nlsk, int ifindex, const struct sockaddr_storage *ss, bool add)
+static int _netdev_addr(struct nl_sock *nlsk, int ifindex, const struct osmo_sockaddr *osa, bool add)
 {
-	const struct sockaddr_in6 *sin6;
-	const struct sockaddr_in *sin;
 	struct nl_addr *local = NULL;
 	struct rtnl_addr *addr;
 	int rc;
 
-	switch (ss->ss_family) {
+	switch (osa->u.sa.sa_family) {
 	case AF_INET:
-		sin = (struct sockaddr_in *) ss;
-		local = nl_addr_build(AF_INET, &sin->sin_addr, 4);
+		local = nl_addr_build(AF_INET, &osa->u.sin.sin_addr, 4);
 		break;
 	case AF_INET6:
-		sin6 = (struct sockaddr_in6 *) ss;
-		local = nl_addr_build(AF_INET6, &sin6->sin6_addr, 16);
+		local = nl_addr_build(AF_INET6, &osa->u.sin6.sin6_addr, 16);
 		break;
 	}
 	OSMO_ASSERT(local);
@@ -64,14 +61,14 @@ static int _netdev_addr(struct nl_sock *nlsk, int ifindex, const struct sockaddr
 	return rc;
 }
 
-int netdev_add_addr(struct nl_sock *nlsk, int ifindex, const struct sockaddr_storage *ss)
+int netdev_add_addr(struct nl_sock *nlsk, int ifindex, const struct osmo_sockaddr *osa)
 {
-	return _netdev_addr(nlsk, ifindex, ss, true);
+	return _netdev_addr(nlsk, ifindex, osa, true);
 }
 
-int netdev_del_addr(struct nl_sock *nlsk, int ifindex, const struct sockaddr_storage *ss)
+int netdev_del_addr(struct nl_sock *nlsk, int ifindex, const struct osmo_sockaddr *osa)
 {
-	return _netdev_addr(nlsk, ifindex, ss, false);
+	return _netdev_addr(nlsk, ifindex, osa, false);
 }
 
 int netdev_set_link(struct nl_sock *nlsk, int ifindex, bool up)

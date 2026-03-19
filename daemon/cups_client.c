@@ -126,7 +126,7 @@ json_t *gen_uecups_result(const char *name, const char *res)
 	return jret;
 }
 
-static int parse_ep(struct sockaddr_storage *out, json_t *in)
+static int parse_ep(struct osmo_sockaddr *out, json_t *in)
 {
 	json_t *jaddr_type, *jport, *jip;
 	const char *addr_type, *ip;
@@ -153,14 +153,14 @@ static int parse_ep(struct sockaddr_storage *out, json_t *in)
 	memset(out, 0, sizeof(*out));
 
 	if (!strcmp(addr_type, "IPV4")) {
-		struct sockaddr_in *sin = (struct sockaddr_in *) out;
+		struct sockaddr_in *sin = &out->u.sin;
 		if (osmo_hexparse(ip, buf, sizeof(buf)) != 4)
 			return -EINVAL;
 		memcpy(&sin->sin_addr, buf, 4);
 		sin->sin_family = AF_INET;
 		sin->sin_port = htons(json_integer_value(jport));
 	} else if (!strcmp(addr_type, "IPV6")) {
-		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *) out;
+		struct sockaddr_in6 *sin6 = &out->u.sin6;
 		if (osmo_hexparse(ip, buf, sizeof(buf)) != 16)
 			return -EINVAL;
 		memcpy(&sin6->sin6_addr, buf, 16);
@@ -172,7 +172,7 @@ static int parse_ep(struct sockaddr_storage *out, json_t *in)
 	return 0;
 }
 
-static int parse_eua(struct sockaddr_storage *out, json_t *jip, json_t *jaddr_type)
+static int parse_eua(struct osmo_sockaddr *out, json_t *jip, json_t *jaddr_type)
 {
 	const char *addr_type, *ip;
 	uint8_t buf[16];
@@ -186,13 +186,13 @@ static int parse_eua(struct sockaddr_storage *out, json_t *jip, json_t *jaddr_ty
 	memset(out, 0, sizeof(*out));
 
 	if (!strcmp(addr_type, "IPV4")) {
-		struct sockaddr_in *sin = (struct sockaddr_in *) out;
+		struct sockaddr_in *sin = &out->u.sin;
 		if (osmo_hexparse(ip, buf, sizeof(buf)) != 4)
 			return -EINVAL;
 		memcpy(&sin->sin_addr, buf, 4);
 		sin->sin_family = AF_INET;
 	} else if (!strcmp(addr_type, "IPV6")) {
-		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *) out;
+		struct sockaddr_in6 *sin6 = &out->u.sin6;
 		if (osmo_hexparse(ip, buf, sizeof(buf)) != 16)
 			return -EINVAL;
 		memcpy(&sin6->sin6_addr, buf, 16);
@@ -348,7 +348,7 @@ static int cups_client_handle_create_tun(struct cups_client *cc, json_t *ctun)
 
 static int cups_client_handle_destroy_tun(struct cups_client *cc, json_t *dtun)
 {
-	struct sockaddr_storage local_ep_addr;
+	struct osmo_sockaddr local_ep_addr;
 	json_t *jlocal_gtp_ep, *jrx_teid;
 	uint32_t rx_teid;
 	int rc;

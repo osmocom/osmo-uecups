@@ -29,8 +29,6 @@ struct osmo_stream_srv_link;
 
 #define MAX_UDP_PACKET 65535
 
-bool sockaddr_equals(const struct sockaddr *a, const struct sockaddr *b);
-
 struct addrinfo *addrinfo_helper(uint16_t family, uint16_t type, uint8_t proto,
 				 const char *host, uint16_t port, bool passive);
 enum {
@@ -44,8 +42,8 @@ enum {
  * netdev / netlink
  ***********************************************************************/
 
-int netdev_add_addr(struct nl_sock *nlsk, int ifindex, const struct sockaddr_storage *ss);
-int netdev_del_addr(struct nl_sock *nlsk, int ifindex, const struct sockaddr_storage *ss);
+int netdev_add_addr(struct nl_sock *nlsk, int ifindex, const struct osmo_sockaddr *osa);
+int netdev_del_addr(struct nl_sock *nlsk, int ifindex, const struct osmo_sockaddr *osa);
 int netdev_set_link(struct nl_sock *nlsk, int ifindex, bool up);
 int netdev_add_defaultroute(struct nl_sock *nlsk, int ifindex, uint8_t family);
 
@@ -68,7 +66,7 @@ struct gtp_endpoint {
 	int fd;
 
 	/* local IP:port */
-	struct sockaddr_storage bind_addr;
+	struct osmo_sockaddr bind_addr;
 	char *name;
 
 	/* the thread handling Rx from the fd/socket */
@@ -77,10 +75,10 @@ struct gtp_endpoint {
 
 
 struct gtp_endpoint *
-gtp_endpoint_find_or_create(struct gtp_daemon *d, const struct sockaddr_storage *bind_addr);
+gtp_endpoint_find_or_create(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr);
 
 struct gtp_endpoint *
-_gtp_endpoint_find(struct gtp_daemon *d, const struct sockaddr_storage *bind_addr);
+_gtp_endpoint_find(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr);
 
 void _gtp_endpoint_deref_destroy(struct gtp_endpoint *ep);
 
@@ -212,10 +210,10 @@ struct gtp_tunnel {
 	uint32_t rx_teid;
 
 	/* End user Address (inner IP) */
-	struct sockaddr_storage	user_addr;
+	struct osmo_sockaddr user_addr;
 
 	/* Remote UDP IP/Port*/
-	struct sockaddr_storage remote_udp;
+	struct osmo_sockaddr remote_udp;
 
 	/* GTP Extension Header */
 	struct gtp1u_exthdrs exthdr;
@@ -227,7 +225,7 @@ struct gtp_tunnel *
 _gtp_tunnel_find_r(struct gtp_daemon *d, uint32_t rx_teid, struct gtp_endpoint *ep);
 
 struct gtp_tunnel *
-_gtp_tunnel_find_eua(struct tun_device *tun, const struct sockaddr *sa, uint8_t proto);
+_gtp_tunnel_find_eua(struct tun_device *tun, const struct osmo_sockaddr *osa, uint8_t proto);
 
 struct gtp_tunnel_params {
 	/* TEID in receive and transmit direction */
@@ -238,13 +236,13 @@ struct gtp_tunnel_params {
 	struct gtp1u_exthdrs exthdr;
 
 	/* end user address */
-	struct sockaddr_storage user_addr;
+	struct osmo_sockaddr user_addr;
 
 	/* remote GTP/UDP IP+Port */
-	struct sockaddr_storage remote_udp;
+	struct osmo_sockaddr remote_udp;
 
 	/* local GTP/UDP IP+Port (used to lookup/create local EP) */
-	struct sockaddr_storage local_udp;
+	struct osmo_sockaddr local_udp;
 
 	/* local TUN device name (used to lookup/create local tun) */
 	const char *tun_name;
@@ -253,7 +251,7 @@ struct gtp_tunnel_params {
 struct gtp_tunnel *gtp_tunnel_alloc(struct gtp_daemon *d, const struct gtp_tunnel_params *cpars);
 
 void _gtp_tunnel_destroy(struct gtp_tunnel *t);
-bool gtp_tunnel_destroy(struct gtp_daemon *d, const struct sockaddr_storage *bind_addr, uint32_t rx_teid);
+bool gtp_tunnel_destroy(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr, uint32_t rx_teid);
 
 
 /***********************************************************************

@@ -146,7 +146,7 @@ DEFUN(show_gtp, show_gtp_cmd,
 	show_ep_hdr(vty);
 	pthread_rwlock_rdlock(&g_daemon->rwlock);
 	if (argc > 0) {
-		ep = _gtp_endpoint_find(g_daemon, (const struct sockaddr_storage *) ai->ai_addr);
+		ep = _gtp_endpoint_find(g_daemon, (const struct osmo_sockaddr *) ai->ai_addr);
 		if (!ep) {
 			pthread_rwlock_unlock(&g_daemon->rwlock);
 			vty_out(vty, "Cannot find GTP endpoint %s:%s%s", argv[0], argv[1], VTY_NEWLINE);
@@ -183,7 +183,7 @@ DEFUN(gtp_create, gtp_create_cmd,
 		return CMD_WARNING;
 	}
 
-	ep = gtp_endpoint_find_or_create(g_daemon, (struct sockaddr_storage *) ai->ai_addr);
+	ep = gtp_endpoint_find_or_create(g_daemon, (const struct osmo_sockaddr *) ai->ai_addr);
 	if (!ep) {
 		vty_out(vty, "Error creating endpoint%s", VTY_NEWLINE);
 		freeaddrinfo(ai);
@@ -214,7 +214,7 @@ DEFUN(gtp_destroy, gtp_destroy_cmd,
 	}
 
 	pthread_rwlock_wrlock(&g_daemon->rwlock);
-	ep = _gtp_endpoint_find(g_daemon, (struct sockaddr_storage *) ai->ai_addr);
+	ep = _gtp_endpoint_find(g_daemon, (const struct osmo_sockaddr *) ai->ai_addr);
 	if (!ep) {
 		pthread_rwlock_unlock(&g_daemon->rwlock);
 		vty_out(vty, "Cannot find to-be-destoryed endpoint%s", VTY_NEWLINE);
@@ -232,11 +232,11 @@ static void show_one_tunnel(struct vty *vty, const struct gtp_tunnel *t)
 {
 	char remote_ip[64], remote_port[16], user_addr[64];
 
-	getnameinfo((struct sockaddr *) &t->remote_udp, sizeof(t->remote_udp),
+	getnameinfo(&t->remote_udp.u.sa, sizeof(t->remote_udp.u.sas),
 		    remote_ip, sizeof(remote_ip), remote_port, sizeof(remote_port),
 		    NI_NUMERICHOST|NI_NUMERICSERV);
 
-	getnameinfo((struct sockaddr *) &t->user_addr, sizeof(t->user_addr),
+	getnameinfo(&t->user_addr.u.sa, sizeof(t->user_addr.u.sas),
 		    user_addr, sizeof(user_addr), NULL, 0,
 		    NI_NUMERICHOST|NI_NUMERICSERV);
 
