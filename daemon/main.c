@@ -36,7 +36,6 @@
 #include <jansson.h>
 
 #include "internal.h"
-#include "netns.h"
 #include "gtp.h"
 
 static void *g_tall_ctx;
@@ -225,8 +224,6 @@ int main(int argc, char **argv)
 	gtpud_vty_init();
 
 	handle_options(argc, argv);
-
-	init_netns();
 
 	rc = vty_read_config_file(g_config_file, NULL);
 	if (rc < 0) {

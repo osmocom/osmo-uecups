@@ -33,11 +33,11 @@
 #include <osmocom/core/linuxlist.h>
 #include <osmocom/core/talloc.h>
 #include <osmocom/core/logging.h>
+#include <osmocom/core/netns.h>
 #include <osmocom/core/utils.h>
 
 #include "gtp.h"
 #include "internal.h"
-#include "netns.h"
 
 /***********************************************************************
  * TUN Device
@@ -320,7 +320,7 @@ _tun_device_create(struct gtp_daemon *d, const char *devname, const char *netns_
 {
 	struct rtnl_link *link;
 	struct tun_device *tun;
-	sigset_t oldmask;
+	struct osmo_netns_switch_state switch_state;
 	int rc;
 
 	tun = talloc_zero(d, struct tun_device);
@@ -333,7 +333,7 @@ _tun_device_create(struct gtp_daemon *d, const char *devname, const char *netns_
 
 	if (netns_name) {
 		tun->netns_name = talloc_strdup(tun, netns_name);
-		tun->netns_fd = get_nsfd(tun->netns_name);
+		tun->netns_fd = osmo_netns_open_fd(tun->netns_name);
 		if (tun->netns_fd < 0) {
 			LOGTUN(tun, LOGL_ERROR, "Cannot obtain netns file descriptor: %s\n",
 				strerror(errno));
@@ -343,7 +343,7 @@ _tun_device_create(struct gtp_daemon *d, const char *devname, const char *netns_
 
 	/* temporarily switch to specified namespace to create tun device */
 	if (tun->netns_name) {
-		rc = switch_ns(tun->netns_fd, &oldmask);
+		rc = osmo_netns_switch_enter(tun->netns_fd, &switch_state);
 		if (rc < 0) {
 			LOGTUN(tun, LOGL_ERROR, "Cannot switch to netns '%s': %s\n",
 				tun->netns_name, strerror(errno));
@@ -374,7 +374,7 @@ _tun_device_create(struct gtp_daemon *d, const char *devname, const char *netns_
 
 	/* switch back to default namespace before creating new thread */
 	if (tun->netns_name)
-		OSMO_ASSERT(restore_ns(&oldmask) == 0);
+		OSMO_ASSERT(osmo_netns_switch_exit(&switch_state) == 0);
 
 	/* bring the network device up */
 	rc = netdev_set_link(tun->nl, tun->ifindex, true);
@@ -413,7 +413,7 @@ err_close:
 	close(tun->fd);
 err_restore_ns:
 	if (tun->netns_name)
-		OSMO_ASSERT(restore_ns(&oldmask) == 0);
+		OSMO_ASSERT(osmo_netns_switch_exit(&switch_state) == 0);
 err_close_ns:
 	if (tun->netns_name)
 		close(tun->netns_fd);

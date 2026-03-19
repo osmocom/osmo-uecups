@@ -13,6 +13,7 @@
 #include <osmocom/core/talloc.h>
 #include <osmocom/core/logging.h>
 #include <osmocom/core/exec.h>
+#include <osmocom/core/netns.h>
 
 #include "internal.h"
 #include "gtp.h"
@@ -405,7 +406,7 @@ static int cups_client_handle_start_program(struct cups_client *cc, json_t *spro
 	struct gtp_daemon *d = cc->d;
 	const char *cmd, *user;
 	char **addl_env = NULL;
-	sigset_t oldmask;
+	struct osmo_netns_switch_state switch_state;
 	int nsfd = -1, rc;
 
 	juser = json_object_get(sprog, "run_as_user");
@@ -447,7 +448,7 @@ static int cups_client_handle_start_program(struct cups_client *cc, json_t *spro
 	}
 
 	if (jnetns) {
-		rc = switch_ns(nsfd, &oldmask);
+		rc = osmo_netns_switch_enter(nsfd, &switch_state);
 		if (rc < 0) {
 			talloc_free(addl_env);
 			return -EIO;
@@ -457,7 +458,7 @@ static int cups_client_handle_start_program(struct cups_client *cc, json_t *spro
 	rc = osmo_system_nowait2(cmd, osmo_environment_whitelist, addl_env, user);
 
 	if (jnetns) {
-		OSMO_ASSERT(restore_ns(&oldmask) == 0);
+		OSMO_ASSERT(osmo_netns_switch_exit(&switch_state) == 0);
 	}
 
 	talloc_free(addl_env);

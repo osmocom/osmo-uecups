@@ -27,7 +27,6 @@ AM_LDFLAGS = \
 
 noinst_HEADERS = \
 	gtp.h \
-	netns.h \
 	internal.h \
 	$(NULL)
 
@@ -39,7 +38,6 @@ osmo_uecups_daemon_SOURCES = \
 	cups_client.c \
 	utility.c \
 	netdev.c \
-	netns.c \
 	tun_device.c \
 	gtp_daemon.c \
 	gtp_endpoint.c \
