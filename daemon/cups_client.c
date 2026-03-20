@@ -133,6 +133,92 @@ json_t *gen_uecups_result(const char *name, const char *res)
 	return jret;
 }
 
+json_t *gen_uecups_ep(const struct gtp_endpoint *ep)
+{
+	json_t *jret = json_object();
+	char *addr_type;
+	char ip_str[32+1];
+	uint16_t port;
+
+	switch (ep->bind_addr.u.sa.sa_family) {
+	case AF_INET:
+		addr_type = "IPV4";
+		osmo_hexdump_buf(ip_str, sizeof(ip_str),
+				(const unsigned char *)&ep->bind_addr.u.sin.sin_addr,
+				sizeof(ep->bind_addr.u.sin.sin_addr),
+				"", true);
+		break;
+	case AF_INET6:
+		addr_type = "IPV6";
+		osmo_hexdump_buf(ip_str, sizeof(ip_str),
+				(const unsigned char *)&ep->bind_addr.u.sin6.sin6_addr,
+				sizeof(ep->bind_addr.u.sin6.sin6_addr),
+				"", true);
+		break;
+	default:
+		OSMO_ASSERT(0);
+	}
+	port = osmo_sockaddr_port(&ep->bind_addr.u.sa);
+
+	json_object_set_new(jret, "addr_type", json_string(addr_type));
+	json_object_set_new(jret, "ip", json_string(ip_str));
+	json_object_set_new(jret, "Port", json_integer(port));
+
+	return jret;
+}
+
+void cc_ipv6_slaac_ind(const struct gtp_tunnel *t)
+{
+	struct gtp_endpoint *ep = t->gtp_ep;
+	struct cups_client *cc;
+	json_t *jtx = json_object();
+	json_t *jslaac_ind = json_object();
+	json_t *jep;
+	char *json_str = NULL;
+	unsigned int json_strlen;
+	char ipv6_str[32+1];
+
+	LOGP(DUECUPS, LOGL_INFO, "ipv6_slaac_ind\n");
+
+	OSMO_ASSERT(jtx);
+	OSMO_ASSERT(jslaac_ind);
+
+	json_object_set_new(jtx, "ipv6_slaac_ind", jslaac_ind);
+
+	jep = gen_uecups_ep(ep);
+	if (!jep)
+		goto free_ret;
+	json_object_set_new(jslaac_ind, "local_gtp_ep", jep);
+
+	json_object_set_new(jslaac_ind, "rx_teid", json_integer(t->rx_teid));
+
+	osmo_hexdump_buf(ipv6_str, sizeof(ipv6_str),
+			 (const unsigned char *)&t->user_addr_ipv6_prefix.u.sin6.sin6_addr,
+			 8, "", true);
+	json_object_set_new(jslaac_ind, "ipv6_prefix", json_string(ipv6_str));
+
+	osmo_hexdump_buf(ipv6_str, sizeof(ipv6_str),
+			(const unsigned char *)&t->user_addr.u.sin6.sin6_addr,
+			sizeof(t->user_addr.u.sin6.sin6_addr),
+			"", true);
+	json_object_set_new(jslaac_ind, "ipv6_user_addr", json_string(ipv6_str));
+
+	json_str = json_dumps(jtx, JSON_SORT_KEYS);
+	if (!json_str) {
+		LOGT(t, LOGL_ERROR, "Error encoding JSON\n");
+		goto free_ret;
+	}
+	json_strlen = strlen(json_str);
+
+	llist_for_each_entry(cc, &t->d->cups_clients, list)
+		cups_client_tx_json_str(cc, json_str, json_strlen);
+
+free_ret:
+	if (jtx)
+		json_decref(jtx);
+	free(json_str);
+}
+
 static int parse_ep(struct osmo_sockaddr *out, json_t *in)
 {
 	json_t *jaddr_type, *jport, *jip;
@@ -525,6 +611,38 @@ static int cups_client_handle_reset_all_state(struct cups_client *cc, json_t *sp
 	return 0;
 }
 
+static int cups_client_handle_ipv6_slaac(struct cups_client *cc, json_t *cmd)
+{
+	struct osmo_sockaddr local_ep_addr;
+	json_t *jlocal_gtp_ep, *jrx_teid;
+	uint32_t rx_teid;
+	int rc;
+
+	jlocal_gtp_ep = json_object_get(cmd, "local_gtp_ep");
+	jrx_teid = json_object_get(cmd, "rx_teid");
+
+	if (!jlocal_gtp_ep || !jrx_teid)
+		return -EINVAL;
+
+	if (!json_is_object(jlocal_gtp_ep) || !json_is_integer(jrx_teid))
+		return -EINVAL;
+
+	rc = parse_ep(&local_ep_addr, jlocal_gtp_ep);
+	if (rc < 0)
+		return rc;
+	rx_teid = json_integer_value(jrx_teid);
+
+	rc = gtp_tunnel_tx_icmpv6_rs(g_daemon, &local_ep_addr, rx_teid);
+	if (rc < 0) {
+		LOGCC(cc, LOGL_NOTICE, "Failed to start IPv6 SLAAC\n");
+		cups_client_tx_json(cc, gen_uecups_result("ipv6_slaac_res", "ERR_IPv6_SLAAC_FAILED"));
+	} else {
+		cups_client_tx_json(cc, gen_uecups_result("ipv6_slaac_res", "OK"));
+	}
+
+	return 0;
+}
+
 static int cups_client_handle_json(struct cups_client *cc, json_t *jroot)
 {
 	void *iter;
@@ -549,6 +667,8 @@ static int cups_client_handle_json(struct cups_client *cc, json_t *jroot)
 		rc = cups_client_handle_start_program(cc, cmd);
 	} else if (!strcmp(key, "reset_all_state")) {
 		rc = cups_client_handle_reset_all_state(cc, cmd);
+	} else if (!strcmp(key, "ipv6_slaac")) {
+		rc = cups_client_handle_ipv6_slaac(cc, cmd);
 	} else {
 		LOGCC(cc, LOGL_NOTICE, "Unknown command '%s' received\n", key);
 		return -EINVAL;

@@ -87,6 +87,9 @@ static void handle_router_adv(struct gtp_tunnel *t, struct ip6_hdr *ip6h, struct
 				     inet_ntop(AF_INET6, &t->user_addr.u.sin6.sin6_addr, &ip6strbuf[1][0], sizeof(ip6strbuf[1])),
 				     strerror(-rc));
 			}
+
+			/* Notify cups_client about the new available IPv6 prefix and global address: */
+			cc_ipv6_slaac_ind(t);
 		}
 	}
 }

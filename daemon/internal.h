@@ -155,6 +155,7 @@ struct cups_client {
 
 struct osmo_stream_srv_link *cups_srv_link_create(struct gtp_daemon *d);
 void child_terminated(struct gtp_daemon *d, int pid, int status);
+void cc_ipv6_slaac_ind(const struct gtp_tunnel *t);
 json_t *gen_uecups_result(const char *name, const char *res);
 int cups_client_tx_json(struct cups_client *cc, json_t *jtx);
 

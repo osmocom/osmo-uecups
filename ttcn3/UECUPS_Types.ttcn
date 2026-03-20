@@ -101,6 +101,27 @@ type record UeCUPS_ResetAllStateRes {
 	UECUPS_Result	result
 };
 
+/* Perform IPv6 SLAAC on GTP-U tunnel to obtain IPv6 global IPv6 address for the UE */
+type record UECUPS_IPv6SLAAC {
+	/* local GTP endpoint + TEID are sufficient for unique identification */
+	UECUPS_SockAddr local_gtp_ep,
+	uint32_t	rx_teid
+};
+
+type record UECUPS_IPv6SLAACRes {
+	UECUPS_Result	result
+};
+
+/* Daemon informs us that IPv6 SLAAC was terminated */
+type record UECUPS_IPv6SLAACInd {
+	/* local GTP endpoint + TEID are sufficient for unique identification */
+	UECUPS_SockAddr local_gtp_ep,
+	uint32_t	rx_teid,
+	OCT8		ipv6_prefix,
+	OCT16		ipv6_user_addr
+};
+
+
 type union PDU_UECUPS {
 	UECUPS_CreateTun	create_tun,
 	UECUPS_CreateTunRes	create_tun_res,
@@ -113,7 +134,11 @@ type union PDU_UECUPS {
 	UECUPS_ProgramTermInd	program_term_ind,
 
 	UeCUPS_ResetAllState	reset_all_state,
-	UeCUPS_ResetAllStateRes	reset_all_state_res
+	UeCUPS_ResetAllStateRes	reset_all_state_res,
+
+	UECUPS_IPv6SLAAC	ipv6_slaac,
+	UECUPS_IPv6SLAACRes	ipv6_slaac_res,
+	UECUPS_IPv6SLAACInd	ipv6_slaac_ind
 };
 
 
@@ -200,6 +225,14 @@ ts_UECUPS_StartProgram(template (value) charstring command,
 	environment := environment,
 	run_as_user := run_as_user,
 	tun_netns_name := tun_netns_name
+};
+
+template (value) UECUPS_IPv6SLAAC
+ts_UECUPS_IPv6SLAAC(template (value) UECUPS_SockAddr local_gtp_ep,
+		    template (value) uint32_t rx_teid)
+:= {
+	local_gtp_ep := local_gtp_ep,
+	rx_teid := rx_teid
 };
 
 } with { encode "JSON" };
