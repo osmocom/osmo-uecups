@@ -188,18 +188,24 @@ static int parse_eua(struct osmo_sockaddr *out, json_t *jip, json_t *jaddr_type)
 
 	if (!strcmp(addr_type, "IPV4")) {
 		struct sockaddr_in *sin = &out->u.sin;
-		if (osmo_hexparse(ip, buf, sizeof(buf)) != 4)
+		if (osmo_hexparse(ip, buf, sizeof(buf)) != 4) {
+			LOGP(DUECUPS, LOGL_NOTICE, "Failed parsing EUA %s type %s\n", ip, addr_type);
 			return -EINVAL;
+		}
 		memcpy(&sin->sin_addr, buf, 4);
 		sin->sin_family = AF_INET;
 	} else if (!strcmp(addr_type, "IPV6")) {
 		struct sockaddr_in6 *sin6 = &out->u.sin6;
-		if (osmo_hexparse(ip, buf, sizeof(buf)) != 16)
+		if (osmo_hexparse(ip, buf, sizeof(buf)) != 16) {
+			LOGP(DUECUPS, LOGL_NOTICE, "Failed parsing EUA %s type %s\n", ip, addr_type);
 			return -EINVAL;
+		}
 		memcpy(&sin6->sin6_addr, buf, 16);
 		sin6->sin6_family = AF_INET6;
-	} else
+	} else {
+		LOGP(DUECUPS, LOGL_NOTICE, "Unknown EUA type %s\n", addr_type);
 		return -EINVAL;
+	}
 
 	return 0;
 }
