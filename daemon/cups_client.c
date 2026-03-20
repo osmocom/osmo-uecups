@@ -85,13 +85,30 @@ void child_terminated(struct gtp_daemon *d, int pid, int status)
 	talloc_free(sproc);
 }
 
+static int cups_client_tx_json_str(struct cups_client *cc, const char *json_str, unsigned int json_strlen)
+{
+	struct msgb *msg = msgb_alloc(CUPS_MSGB_SIZE, "Tx JSON");
+	char *out;
+	LOGCC(cc, LOGL_DEBUG, "JSON Tx '%s'\n", json_str);
+
+	if (json_strlen > msgb_tailroom(msg)) {
+		LOGCC(cc, LOGL_ERROR, "Not enough room for JSON in msgb\n");
+		return 0;
+	}
+
+	out = (char *)msgb_put(msg, json_strlen);
+	memcpy(out, json_str, json_strlen);
+	osmo_stream_srv_send(cc->srv, msg);
+
+	return 0;
+}
+
 /* Send JSON to a given client/connection */
 int cups_client_tx_json(struct cups_client *cc, json_t *jtx)
 {
-	struct msgb *msg = msgb_alloc(CUPS_MSGB_SIZE, "Tx JSON");
 	char *json_str = json_dumps(jtx, JSON_SORT_KEYS);
-	char *out;
-	int json_strlen;
+	unsigned int json_strlen;
+	int rc;
 
 	json_decref(jtx);
 	if (!json_str) {
@@ -100,20 +117,9 @@ int cups_client_tx_json(struct cups_client *cc, json_t *jtx)
 	}
 	json_strlen = strlen(json_str);
 
-	LOGCC(cc, LOGL_DEBUG, "JSON Tx '%s'\n", json_str);
-
-	if (json_strlen > msgb_tailroom(msg)) {
-		LOGCC(cc, LOGL_ERROR, "Not enough room for JSON in msgb\n");
-		free(json_str);
-		return 0;
-	}
-
-	out = (char *)msgb_put(msg, json_strlen);
-	memcpy(out, json_str, json_strlen);
+	rc = cups_client_tx_json_str(cc, json_str, json_strlen);
 	free(json_str);
-	osmo_stream_srv_send(cc->srv, msg);
-
-	return 0;
+	return rc;
 }
 
 json_t *gen_uecups_result(const char *name, const char *res)
