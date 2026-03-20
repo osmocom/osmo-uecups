@@ -14,10 +14,9 @@
 #include <osmocom/core/talloc.h>
 #include <osmocom/core/logging.h>
 
-#include "internal.h"
+#include <osmocom/netif/icmpv6.h>
 
-#define LOGT(t, lvl, fmt, args ...) \
-	LOGP(DGT, lvl, "%s: " fmt, (t)->name, ## args)
+#include "internal.h"
 
 /***********************************************************************
  * GTP Tunnel
@@ -58,7 +57,8 @@ struct gtp_tunnel *gtp_tunnel_alloc(struct gtp_daemon *d, const struct gtp_tunne
 	t->rx_teid = cpars->rx_teid;
 	t->tx_teid = cpars->tx_teid;
 	memcpy(&t->exthdr, &cpars->exthdr, sizeof(t->exthdr));
-	memcpy(&t->user_addr, &cpars->user_addr, sizeof(t->user_addr));
+	memcpy(&t->user_addr_ipv6_ll, &cpars->user_addr, sizeof(t->user_addr));
+	memcpy(&t->user_addr, &t->user_addr_ipv6_ll, sizeof(t->user_addr_ipv6_ll));
 	memcpy(&t->remote_udp, &cpars->remote_udp, sizeof(t->remote_udp));
 
 	if ((rc = osmo_netdev_add_addr(t->tun_dev->netdev, &t->user_addr, 32)) < 0) {
@@ -172,4 +172,41 @@ bool gtp_tunnel_destroy(struct gtp_daemon *d, const struct osmo_sockaddr *bind_a
 	pthread_rwlock_unlock(&d->rwlock);
 
 	return rc;
+}
+
+/* Called with d->rwlock locked, tx_gtp1u_pk() will unlock. */
+static int _gtp_tunnel_tx_icmpv6_rs(struct gtp_tunnel *t)
+{
+	struct msgb *msg;
+	int rc;
+
+	OSMO_ASSERT(t->user_addr.u.sa.sa_family == AF_INET6);
+
+	msg = osmo_icmpv6_construct_rs(&t->user_addr.u.sin6.sin6_addr);
+
+	pthread_rwlock_rdlock(&t->d->rwlock);
+	rc = tx_gtp1u_pkt(t, msg->head, msgb_data(msg), msgb_length(msg));
+	/* pthread_rwlock_unlock() was called inside tx_gtp1u_pkt(). */
+	if (rc < 0)
+		LOGT(t, LOGL_FATAL, "Error Writing to UDP socket: %s\n", strerror(errno));
+	msgb_free(msg);
+	return 0;
+}
+
+int gtp_tunnel_tx_icmpv6_rs(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr, uint32_t rx_teid)
+{
+	struct gtp_endpoint *ep;
+
+	pthread_rwlock_wrlock(&d->rwlock);
+	ep = _gtp_endpoint_find(d, bind_addr);
+	if (ep) {
+		/* find tunnel for rx TEID within endpoint */
+		struct gtp_tunnel *t = _gtp_tunnel_find_r(d, rx_teid, ep);
+		if (t) {
+			return _gtp_tunnel_tx_icmpv6_rs(t);
+			/* pthread_rwlock_unlock() was called inside _gtp_tunnel_tx_icmpv6_rs()->tx_gtp1u_pkt(). */
+		}
+	}
+	pthread_rwlock_unlock(&d->rwlock);
+	return -ENOENT;
 }

@@ -13,6 +13,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <arpa/inet.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 
 #include <pthread.h>
 
@@ -20,6 +23,8 @@
 #include <osmocom/core/socket.h>
 #include <osmocom/core/talloc.h>
 #include <osmocom/core/logging.h>
+
+#include <osmocom/netif/icmpv6.h>
 
 #include "gtp.h"
 #include "internal.h"
@@ -41,6 +46,51 @@
  * GTP Endpoint (UDP socket)
  ***********************************************************************/
 
+static void handle_router_adv(struct gtp_tunnel *t, struct ip6_hdr *ip6h, struct osmo_icmpv6_radv_hdr *ra, size_t ra_len)
+{
+	struct osmo_icmpv6_opt_hdr *opt_hdr;
+	struct osmo_icmpv6_opt_prefix *opt_prefix;
+	int rc;
+	struct in6_addr rm;
+	char ip6strbuf[2][INET6_ADDRSTRLEN];
+	memset(&rm, 0, sizeof(rm));
+
+	LOGT(t, LOGL_INFO, "Received ICMPv6 Router Advertisement\n");
+
+	foreach_icmpv6_opt(ra, ra_len, opt_hdr) {
+		if (opt_hdr->type == ICMPv6_OPT_TYPE_PREFIX_INFO) {
+			opt_prefix = (struct osmo_icmpv6_opt_prefix *)opt_hdr;
+			size_t prefix_len_bytes = (opt_prefix->prefix_len + 7)/8;
+			LOGT(t, LOGL_DEBUG, "Parsing OPT Prefix info (prefix_len=%u): %s\n",
+			     opt_prefix->prefix_len,
+			     osmo_hexdump((const unsigned char *)opt_prefix->prefix, prefix_len_bytes));
+
+			memcpy(&t->user_addr_ipv6_prefix.u.sin6.sin6_addr,
+			       opt_prefix->prefix,
+			       prefix_len_bytes);
+			memset(&((uint8_t *)&t->user_addr_ipv6_prefix.u.sin6.sin6_addr)[prefix_len_bytes],
+			     0, 16 - prefix_len_bytes);
+
+			/* Pick second address in the prefix: */
+			memcpy(&t->user_addr.u.sin6.sin6_addr,
+			       &t->user_addr_ipv6_prefix.u.sin6.sin6_addr,
+			       sizeof(t->user_addr_ipv6_prefix.u.sin6.sin6_addr));
+			((uint8_t *)&t->user_addr.u.sin6.sin6_addr)[15] = 2;
+
+			LOGT(t, LOGL_INFO, "Adding global IPv6 prefix %s/%u address %s\n",
+			     inet_ntop(AF_INET6, &t->user_addr_ipv6_prefix.u.sin6.sin6_addr, &ip6strbuf[0][0], sizeof(ip6strbuf[0])),
+			     opt_prefix->prefix_len,
+			     inet_ntop(AF_INET6, &t->user_addr.u.sin6.sin6_addr, &ip6strbuf[1][0], sizeof(ip6strbuf[1])));
+
+			if ((rc = osmo_netdev_add_addr(t->tun_dev->netdev, &t->user_addr, 64)) < 0) {
+				LOGT(t, LOGL_ERROR, "Cannot add global IPv6 user addr %s to tun device: %s\n",
+				     inet_ntop(AF_INET6, &t->user_addr.u.sin6.sin6_addr, &ip6strbuf[1][0], sizeof(ip6strbuf[1])),
+				     strerror(-rc));
+			}
+		}
+	}
+}
+
 static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigned int nread)
 {
 	struct gtp_daemon *d = ep->d;
@@ -50,6 +100,7 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 	int rc, outfd;
 	uint32_t teid;
 	uint16_t gtp_len;
+	char ip6strbuf[200];
 
 	if (nread < sizeof(*gtph)) {
 		LOGEP_NC(ep, LOGL_NOTICE, "Short read: %u < %lu\n", nread, sizeof(*gtph));
@@ -114,6 +165,54 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 		return;
 	}
 	outfd = t->tun_dev->fd;
+
+	struct iphdr *iph = (struct iphdr *)payload;
+	struct ip6_hdr *ip6h;
+	struct osmo_icmpv6_radv_hdr *ra;
+	switch (iph->version) {
+	case 4:
+		if (t->user_addr.u.sa.sa_family != AF_INET) {
+			LOGT(t, LOGL_NOTICE, "Rx GTPU payload for unexpected IPv4 %s in non-IPv4 PDP Context\n",
+				inet_ntop(AF_INET, &iph->daddr, ip6strbuf, sizeof(ip6strbuf)));
+			goto unlock_ret;
+		}
+		if (memcmp(&iph->daddr, &t->user_addr.u.sin.sin_addr, 4) != 0) {
+			LOGT(t, LOGL_NOTICE, "Rx GTPU payload for unknown dst IP addr %s\n",
+				inet_ntop(AF_INET, &iph->daddr, ip6strbuf, sizeof(ip6strbuf)));
+			goto unlock_ret;
+		}
+		break;
+	case 6:
+		ip6h = (struct ip6_hdr *)payload;
+		if (t->user_addr.u.sa.sa_family != AF_INET6) {
+			LOGT(t, LOGL_NOTICE, "Rx GTPU payload for unexpected IPv6 %s in non-IPv6 PDP Context\n",
+				inet_ntop(AF_INET6, &ip6h->ip6_dst, ip6strbuf, sizeof(ip6strbuf)));
+			goto unlock_ret;
+		}
+		if (IN6_IS_ADDR_LINKLOCAL(&ip6h->ip6_dst)) {
+			if (memcmp(&ip6h->ip6_dst, &t->user_addr_ipv6_ll.u.sin6.sin6_addr, 16) != 0) {
+				LOGT(t, LOGL_NOTICE, "Rx GTPU payload for unknown link-local dst IP addr %s\n",
+				     inet_ntop(AF_INET6, &ip6h->ip6_dst, ip6strbuf, sizeof(ip6strbuf)));
+				goto unlock_ret;
+			}
+			if ((ra = osmo_icmpv6_validate_router_adv(payload, gtp_len))) {
+				size_t ra_len = (uint8_t *)ra - (uint8_t *)payload;
+				handle_router_adv(t, (struct ip6_hdr *)payload, ra, ra_len);
+				goto unlock_ret;
+			}
+		/* Match by global IPv6 /64 prefix allocated through SLAAC: */
+		} else if (memcmp(&ip6h->ip6_dst, &t->user_addr.u.sin6.sin6_addr, 8) != 0) {
+			LOGT(t, LOGL_NOTICE, "Rx GTPU payload for unknown global dst IP addr %s\n",
+			     inet_ntop(AF_INET6, &ip6h->ip6_dst, ip6strbuf, sizeof(ip6strbuf)));
+			goto unlock_ret;
+		}
+		break;
+	default:
+		LOGT(t, LOGL_NOTICE, "Rx GTPU payload with unknown IP version %d\n", iph->version);
+		goto unlock_ret;
+	}
+
+	outfd = t->tun_dev->fd;
 	pthread_rwlock_unlock(&d->rwlock);
 
 	/* 3) write to TUN device */
@@ -122,6 +221,11 @@ static void handle_gtp1u(struct gtp_endpoint *ep, const uint8_t *buffer, unsigne
 		LOGEP_NC(ep, LOGL_FATAL, "Error writing to tun device %s\n", strerror(errno));
 		exit(1);
 	}
+	return;
+
+unlock_ret:
+	pthread_rwlock_unlock(&d->rwlock);
+	return;
 }
 
 /* One thread for reading from each GTP/UDP socket (GTP decapsulation -> tun)

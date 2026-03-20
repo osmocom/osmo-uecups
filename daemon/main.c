@@ -100,7 +100,11 @@ static const struct log_info_cat log_categories[] = {
 		.description = "UE Control User Plane Separation",
 		.enabled = 1, .loglevel = LOGL_DEBUG,
 	},
-
+	[DICMP6] = {
+		.name = "DICMP6",
+		.description = "ICMPv6 (SLAAC) PDU Session setup",
+		.enabled = 1, .loglevel = LOGL_DEBUG,
+	},
 };
 
 static const struct log_info log_info = {

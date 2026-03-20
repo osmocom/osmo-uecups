@@ -14,6 +14,7 @@
 #include <osmocom/core/utils.h>
 #include <osmocom/core/socket.h>
 #include <osmocom/core/netdev.h>
+#include <osmocom/core/logging.h>
 
 #include <osmocom/netif/stream.h>
 
@@ -35,6 +36,7 @@ enum {
 	DEP,
 	DGT,
 	DUECUPS,
+	DICMP6,
 };
 
 
@@ -43,6 +45,7 @@ enum {
  ***********************************************************************/
 
 struct gtp_daemon;
+struct gtp_tunnel;
 
 /* local UDP socket for GTP communication */
 struct gtp_endpoint {
@@ -199,6 +202,8 @@ struct gtp_tunnel {
 	uint32_t rx_teid;
 
 	/* End user Address (inner IP) */
+	struct osmo_sockaddr user_addr_ipv6_ll;
+	struct osmo_sockaddr user_addr_ipv6_prefix;
 	struct osmo_sockaddr user_addr;
 
 	/* Remote UDP IP/Port*/
@@ -241,7 +246,12 @@ struct gtp_tunnel *gtp_tunnel_alloc(struct gtp_daemon *d, const struct gtp_tunne
 
 void _gtp_tunnel_destroy(struct gtp_tunnel *t);
 bool gtp_tunnel_destroy(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr, uint32_t rx_teid);
+int gtp_tunnel_tx_icmpv6_rs(struct gtp_daemon *d, const struct osmo_sockaddr *bind_addr, uint32_t rx_teid);
 
+int tx_gtp1u_pkt(struct gtp_tunnel *t, uint8_t *base_buffer, const uint8_t *payload, unsigned int payload_len);
+
+#define LOGT(t, lvl, fmt, args ...) \
+	LOGP(DGT, lvl, "%s: " fmt, (t)->name, ## args)
 
 /***********************************************************************
  * GTP Daemon

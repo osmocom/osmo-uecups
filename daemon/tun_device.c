@@ -139,7 +139,7 @@ static void tun_device_pthread_cleanup_routine(void *data)
 }
 
 /* Note: This function is called with d->rwlock locked, and it's responsible of unlocking it before returning. */
-static int tx_gtp1u_pkt(struct gtp_tunnel *t, uint8_t *base_buffer, const uint8_t *payload, unsigned int payload_len)
+int tx_gtp1u_pkt(struct gtp_tunnel *t, uint8_t *base_buffer, const uint8_t *payload, unsigned int payload_len)
 {
 	struct gtp1_header *gtph;
 	unsigned int head_len = payload - base_buffer;
