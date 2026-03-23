@@ -198,9 +198,9 @@ void cc_ipv6_slaac_ind(const struct gtp_tunnel *t)
 	json_object_set_new(jslaac_ind, "ipv6_prefix", json_string(ipv6_str));
 
 	osmo_hexdump_buf(ipv6_str, sizeof(ipv6_str),
-			(const unsigned char *)&t->user_addr.u.sin6.sin6_addr,
-			sizeof(t->user_addr.u.sin6.sin6_addr),
-			"", true);
+			 (const unsigned char *)&t->user_addr_ipv6_global.u.sin6.sin6_addr,
+			 sizeof(t->user_addr_ipv6_global.u.sin6.sin6_addr),
+			 "", true);
 	json_object_set_new(jslaac_ind, "ipv6_user_addr", json_string(ipv6_str));
 
 	json_str = json_dumps(jtx, JSON_SORT_KEYS);
@@ -265,21 +265,26 @@ static int parse_ep(struct osmo_sockaddr *out, json_t *in)
 	return 0;
 }
 
-static int parse_eua(struct osmo_sockaddr *out, json_t *jip, json_t *jaddr_type)
+static int parse_eua(enum gtp1u_eua_type *user_addr_type, struct osmo_sockaddr *out4,
+		     struct osmo_sockaddr *out6, json_t *jip, json_t *jaddr_type)
 {
 	const char *addr_type, *ip;
-	uint8_t buf[16];
-
+	uint8_t buf[20];
+	struct sockaddr_in *sin = &out4->u.sin;
+	struct sockaddr_in6 *sin6 = &out6->u.sin6;
 	if (!json_is_string(jip) || !json_is_string(jaddr_type))
 		return -EINVAL;
 
 	addr_type = json_string_value(jaddr_type);
 	ip = json_string_value(jip);
 
-	memset(out, 0, sizeof(*out));
+	memset(out4, 0, sizeof(*out4));
+	out4->u.sa.sa_family = AF_UNSPEC;
+	memset(out6, 0, sizeof(*out6));
+	out6->u.sa.sa_family = AF_UNSPEC;
 
 	if (!strcmp(addr_type, "IPV4")) {
-		struct sockaddr_in *sin = &out->u.sin;
+		*user_addr_type = GTP1U_EUA_TYPE_IPv4;
 		if (osmo_hexparse(ip, buf, sizeof(buf)) != 4) {
 			LOGP(DUECUPS, LOGL_NOTICE, "Failed parsing EUA %s type %s\n", ip, addr_type);
 			return -EINVAL;
@@ -287,12 +292,22 @@ static int parse_eua(struct osmo_sockaddr *out, json_t *jip, json_t *jaddr_type)
 		memcpy(&sin->sin_addr, buf, 4);
 		sin->sin_family = AF_INET;
 	} else if (!strcmp(addr_type, "IPV6")) {
-		struct sockaddr_in6 *sin6 = &out->u.sin6;
+		*user_addr_type = GTP1U_EUA_TYPE_IPv6;
 		if (osmo_hexparse(ip, buf, sizeof(buf)) != 16) {
 			LOGP(DUECUPS, LOGL_NOTICE, "Failed parsing EUA %s type %s\n", ip, addr_type);
 			return -EINVAL;
 		}
 		memcpy(&sin6->sin6_addr, buf, 16);
+		sin6->sin6_family = AF_INET6;
+	} else if (!strcmp(addr_type, "IPV4V6")) {
+		*user_addr_type = GTP1U_EUA_TYPE_IPv4v6;
+		if (osmo_hexparse(ip, buf, sizeof(buf)) != 20) {
+			LOGP(DUECUPS, LOGL_NOTICE, "Failed parsing EUA %s type %s\n", ip, addr_type);
+			return -EINVAL;
+		}
+		memcpy(&sin->sin_addr, buf, 4);
+		sin->sin_family = AF_INET;
+		memcpy(&sin6->sin6_addr, buf + 4, 16);
 		sin6->sin6_family = AF_INET6;
 	} else {
 		LOGP(DUECUPS, LOGL_NOTICE, "Unknown EUA type %s\n", addr_type);
@@ -395,7 +410,8 @@ static int parse_create_tun(struct gtp_tunnel_params *out, json_t *ctun)
 	rc = parse_ep(&out->remote_udp, jremote_gtp_ep);
 	if (rc < 0)
 		return rc;
-	rc = parse_eua(&out->user_addr, juser_addr, juser_addr_type);
+	rc = parse_eua(&out->user_addr_type, &out->user_addr_ipv4,
+		       &out->user_addr_ipv6, juser_addr, juser_addr_type);
 	if (rc < 0)
 		return rc;
 	out->rx_teid = json_integer_value(jrx_teid);

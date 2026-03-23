@@ -172,6 +172,12 @@ int cups_client_tx_json(struct cups_client *cc, json_t *jtx);
  *    this is what happens when IP arrives on the tun device
  */
 
+enum gtp1u_eua_type {
+	GTP1U_EUA_TYPE_IPv4,
+	GTP1U_EUA_TYPE_IPv6,
+	GTP1U_EUA_TYPE_IPv4v6,
+};
+
 struct gtp1u_exthdr_pdu_sess_container {
 	bool enabled;
 	uint8_t pdu_type; /* GTP1_EXTHDR_PDU_TYPE_* */
@@ -203,9 +209,11 @@ struct gtp_tunnel {
 	uint32_t rx_teid;
 
 	/* End user Address (inner IP) */
+	enum gtp1u_eua_type user_addr_type;
+	struct osmo_sockaddr user_addr_ipv4;
 	struct osmo_sockaddr user_addr_ipv6_ll;
 	struct osmo_sockaddr user_addr_ipv6_prefix;
-	struct osmo_sockaddr user_addr;
+	struct osmo_sockaddr user_addr_ipv6_global;
 
 	/* Remote UDP IP/Port*/
 	struct osmo_sockaddr remote_udp;
@@ -231,7 +239,9 @@ struct gtp_tunnel_params {
 	struct gtp1u_exthdrs exthdr;
 
 	/* end user address */
-	struct osmo_sockaddr user_addr;
+	enum gtp1u_eua_type user_addr_type;
+	struct osmo_sockaddr user_addr_ipv4;
+	struct osmo_sockaddr user_addr_ipv6;
 
 	/* remote GTP/UDP IP+Port */
 	struct osmo_sockaddr remote_udp;

@@ -230,20 +230,34 @@ DEFUN(gtp_destroy, gtp_destroy_cmd,
 
 static void show_one_tunnel(struct vty *vty, const struct gtp_tunnel *t)
 {
-	char remote_ip[64], remote_port[16], user_addr[64];
+	char remote_ip[64], remote_port[16], user_addr_v4[64], user_addr_v6[64];
 
 	getnameinfo(&t->remote_udp.u.sa, sizeof(t->remote_udp.u.sas),
 		    remote_ip, sizeof(remote_ip), remote_port, sizeof(remote_port),
 		    NI_NUMERICHOST|NI_NUMERICSERV);
 
-	getnameinfo(&t->user_addr.u.sa, sizeof(t->user_addr.u.sas),
-		    user_addr, sizeof(user_addr), NULL, 0,
-		    NI_NUMERICHOST|NI_NUMERICSERV);
+	if (t->user_addr_type == GTP1U_EUA_TYPE_IPv4 || t->user_addr_type == GTP1U_EUA_TYPE_IPv4v6) {
+		getnameinfo(&t->user_addr_ipv4.u.sa, sizeof(t->user_addr_ipv4.u.sas),
+			    user_addr_v4, sizeof(user_addr_v4), NULL, 0,
+			    NI_NUMERICHOST|NI_NUMERICSERV);
+	} else {
+		user_addr_v4[0] = '\0';
+	}
+	if ((t->user_addr_type == GTP1U_EUA_TYPE_IPv6 || t->user_addr_type == GTP1U_EUA_TYPE_IPv4v6) &&
+	    t->user_addr_ipv6_global.u.sa.sa_family == AF_INET6) {
+		getnameinfo(&t->user_addr_ipv6_global.u.sa, sizeof(t->user_addr_ipv6_global.u.sas),
+			    user_addr_v6, sizeof(user_addr_v6), NULL, 0,
+			    NI_NUMERICHOST|NI_NUMERICSERV);
+	} else {
+		user_addr_v6[0] = '\0';
+	}
 
-
-	vty_out(vty, "%s/%08X - %s:%s/%08X %s(%s) %s%s",
-		t->gtp_ep->name, t->rx_teid, remote_ip, remote_port, t->tx_teid,
-		t->tun_dev->devname, t->tun_dev->netns_name, user_addr, VTY_NEWLINE);
+	vty_out(vty, "%s/%08X - %s:%s/%08X %s(%s) %s%s%s%s",
+		t->gtp_ep->name, t->rx_teid,
+		remote_ip, remote_port, t->tx_teid,
+		t->tun_dev->devname, t->tun_dev->netns_name, user_addr_v4,
+		(user_addr_v4[0] != '\0' && user_addr_v6[0] != '\0') ? " " : "",
+		user_addr_v6, VTY_NEWLINE);
 }
 
 DEFUN(show_tunnel, show_tunnel_cmd,

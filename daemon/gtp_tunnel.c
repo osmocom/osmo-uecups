@@ -57,14 +57,27 @@ struct gtp_tunnel *gtp_tunnel_alloc(struct gtp_daemon *d, const struct gtp_tunne
 	t->rx_teid = cpars->rx_teid;
 	t->tx_teid = cpars->tx_teid;
 	memcpy(&t->exthdr, &cpars->exthdr, sizeof(t->exthdr));
-	memcpy(&t->user_addr_ipv6_ll, &cpars->user_addr, sizeof(t->user_addr));
-	memcpy(&t->user_addr, &t->user_addr_ipv6_ll, sizeof(t->user_addr_ipv6_ll));
-	memcpy(&t->remote_udp, &cpars->remote_udp, sizeof(t->remote_udp));
 
-	if ((rc = osmo_netdev_add_addr(t->tun_dev->netdev, &t->user_addr, 32)) < 0) {
-		LOGT(t, LOGL_ERROR, "Cannot add user addr to tun device: %s\n",
-		     strerror(-rc));
+	if (cpars->user_addr_type == GTP1U_EUA_TYPE_IPv4 || cpars->user_addr_type == GTP1U_EUA_TYPE_IPv4v6) {
+		memcpy(&t->user_addr_ipv4, &cpars->user_addr_ipv4, sizeof(t->user_addr_ipv4));
+		if ((rc = osmo_netdev_add_addr(t->tun_dev->netdev, &t->user_addr_ipv4, 32)) < 0) {
+			LOGT(t, LOGL_ERROR, "Cannot add user addr to tun device: %s\n",
+			strerror(-rc));
+		}
+	} else {
+		t->user_addr_ipv4.u.sa.sa_family = AF_UNSPEC;
 	}
+
+	t->user_addr_type = cpars->user_addr_type;
+	if (cpars->user_addr_type == GTP1U_EUA_TYPE_IPv6 || cpars->user_addr_type == GTP1U_EUA_TYPE_IPv4v6)
+		memcpy(&t->user_addr_ipv6_ll, &cpars->user_addr_ipv6, sizeof(t->user_addr_ipv6_ll));
+	else
+		t->user_addr_ipv6_ll.u.sa.sa_family = AF_UNSPEC;
+
+	/* user_addr_ipv6_global will be set later on during IPv6 SLAAC procedure: */
+	t->user_addr_ipv6_global.u.sa.sa_family = AF_UNSPEC;
+
+	memcpy(&t->remote_udp, &cpars->remote_udp, sizeof(t->remote_udp));
 
 	/* TODO: hash table? */
 	llist_add_tail(&t->list, &d->gtp_tunnels);
@@ -125,9 +138,23 @@ _gtp_tunnel_find_eua(struct tun_device *tun, const struct osmo_sockaddr *osa, ui
 
 	llist_for_each_entry(t, &d->gtp_tunnels, list) {
 		/* TODO: Find best matching filter */
-		if (t->tun_dev == tun &&
-		    osmo_sockaddr_cmp(osa, &t->user_addr) == 0)
+		if (t->tun_dev != tun)
+			continue;
+		switch (osa->u.sa.sa_family) {
+		case AF_INET:
+			if (t->user_addr_type == GTP1U_EUA_TYPE_IPv6)
+				continue;
+			if (osmo_sockaddr_cmp(osa, &t->user_addr_ipv4) != 0)
+				continue;
 			return t;
+		case AF_INET6:
+			if (t->user_addr_type == GTP1U_EUA_TYPE_IPv4)
+				continue;
+			if (osmo_sockaddr_cmp(osa, &t->user_addr_ipv6_ll) != 0 &&
+			    osmo_sockaddr_cmp(osa, &t->user_addr_ipv6_global) != 0)
+				continue;
+			return t;
+		}
 	}
 	return NULL;
 }
@@ -141,8 +168,18 @@ void _gtp_tunnel_destroy(struct gtp_tunnel *t)
 	/* talloc is not thread safe, all alloc/free must come from main thread */
 	ASSERT_MAIN_THREAD(t->d);
 
-	if ((rc = osmo_netdev_del_addr(t->tun_dev->netdev, &t->user_addr, 32)) < 0)
-		LOGT(t, LOGL_ERROR, "Cannot remove user address: %s\n", strerror(-rc));
+	if (t->user_addr_type == GTP1U_EUA_TYPE_IPv4 || t->user_addr_type == GTP1U_EUA_TYPE_IPv4v6) {
+		if ((rc = osmo_netdev_del_addr(t->tun_dev->netdev, &t->user_addr_ipv4, 32)) < 0)
+			LOGT(t, LOGL_ERROR, "Cannot remove IPv4 user address: %s\n", strerror(-rc));
+	}
+	if (t->user_addr_type == GTP1U_EUA_TYPE_IPv6 || t->user_addr_type == GTP1U_EUA_TYPE_IPv4v6) {
+		if ((rc = osmo_netdev_del_addr(t->tun_dev->netdev, &t->user_addr_ipv6_ll, 32)) < 0)
+			LOGT(t, LOGL_ERROR, "Cannot remove IPv6 link-local user address: %s\n", strerror(-rc));
+		if (t->user_addr_ipv6_global.u.sa.sa_family != AF_UNSPEC) {
+			if ((rc = osmo_netdev_del_addr(t->tun_dev->netdev, &t->user_addr_ipv6_global, 32)) < 0)
+				LOGT(t, LOGL_ERROR, "Cannot remove IPv6 global user address: %s\n", strerror(-rc));
+		}
+	}
 
 	llist_del(&t->list);
 
@@ -180,9 +217,10 @@ static int _gtp_tunnel_tx_icmpv6_rs(struct gtp_tunnel *t)
 	struct msgb *msg;
 	int rc;
 
-	OSMO_ASSERT(t->user_addr.u.sa.sa_family == AF_INET6);
+	OSMO_ASSERT(t->user_addr_type == GTP1U_EUA_TYPE_IPv6 ||
+		    t->user_addr_type == GTP1U_EUA_TYPE_IPv4v6);
 
-	msg = osmo_icmpv6_construct_rs(&t->user_addr.u.sin6.sin6_addr);
+	msg = osmo_icmpv6_construct_rs(&t->user_addr_ipv6_ll.u.sin6.sin6_addr);
 
 	pthread_rwlock_rdlock(&t->d->rwlock);
 	rc = tx_gtp1u_pkt(t, msg->head, msgb_data(msg), msgb_length(msg));
