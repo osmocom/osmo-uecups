@@ -215,7 +215,11 @@ bool gtp_tunnel_destroy(struct gtp_daemon *d, const struct osmo_sockaddr *bind_a
 static int _gtp_tunnel_tx_icmpv6_rs(struct gtp_tunnel *t)
 {
 	struct msgb *msg;
+	char ipbuf[INET6_ADDRSTRLEN];
 	int rc;
+
+	LOGT(t, LOGL_INFO, "Tx ICMPv6 Router Solicitation for %s\n",
+	     osmo_sockaddr_ntop(&t->user_addr_ipv6_ll.u.sa, ipbuf));
 
 	OSMO_ASSERT(t->user_addr_type == GTP1U_EUA_TYPE_IPv6 ||
 		    t->user_addr_type == GTP1U_EUA_TYPE_IPv4v6);
